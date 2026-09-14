@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+exec kitty \
+  --title "TUI Commander" \
+  --class "tui-commander" \
+  --override 'window_padding_width=0 4' \
+  --override 'single_window_padding_width=0 4' \
+  --override 'map=ctrl+alt+c send_text all \x1b\x03' \
+  --override 'map=ctrl+shift+n send_text all \x1d' \
+  "$HOME/.local/bin/tui-commander" "$@"

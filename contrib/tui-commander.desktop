@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=TUI Commander
+Comment=Two-pane local and remote file manager
+Exec=open-tui-commander %F
+Icon=/home/hussar/.local/share/icons/tui-commander/tui-commander.png
+Terminal=false
+Type=Application
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupNotify=true
+StartupWMClass=tui-commander
