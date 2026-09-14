@@ -69,12 +69,12 @@ func TestSingleLocationHeaderTracksFocusedPane(t *testing.T) {
 func TestShortcutFooterWrapsWithoutDroppingBindings(t *testing.T) {
 	rows := shortcutRows(80)
 	joined := strings.Join(rows, "\n")
-	for _, binding := range []string{"F1", "F12", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+U", "Alt+R"} {
+	for _, binding := range []string{"F1", "F12", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+R"} {
 		if !strings.Contains(joined, binding) {
 			t.Fatalf("shortcut footer is missing %s:\n%s", binding, joined)
 		}
 	}
-	for _, excluded := range []string{"Ctrl+G", "Ctrl+H", "Ctrl+T", "Ctrl+Alt+C", "Alt+M"} {
+	for _, excluded := range []string{"Ctrl+G", "Ctrl+H", "Ctrl+T", "Ctrl+Alt+C", "Alt+M", "Alt+U"} {
 		if strings.Contains(joined, excluded) {
 			t.Fatalf("shortcut footer unexpectedly contains %s:\n%s", excluded, joined)
 		}
@@ -469,6 +469,78 @@ func TestConnectionListShowsProtocolAndEditableDisplayNameOnly(t *testing.T) {
 	}
 	if model.config.Bookmarks[0].Location != "ftpes://alice@secret.example:2121/private/logs" || model.config.Bookmarks[0].Password != "secret" {
 		t.Fatalf("edit changed hidden connection details: %#v", model.config.Bookmarks[0])
+	}
+}
+
+func TestBookmarkListCanBeReorderedAndSorted(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.config.Bookmarks = []config.Bookmark{
+		{Name: "Alpha", Location: "/srv/alpha"},
+		{Name: "Zulu", Location: "/srv/zulu"},
+	}
+	model.modal = modalBookmarks
+	model.bookmarks.cursor = 1
+
+	model.Update(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	if model.bookmarks.cursor != 0 || model.config.Bookmarks[0].Name != "Zulu" {
+		t.Fatalf("manual bookmark order = cursor %d, bookmarks %#v", model.bookmarks.cursor, model.config.Bookmarks)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Bookmarks) != 2 || loaded.Bookmarks[0].Name != "Zulu" {
+		t.Fatalf("persisted bookmark order = %#v", loaded.Bookmarks)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if model.config.Bookmarks[0].Name != "Alpha" || model.config.Bookmarks[1].Name != "Zulu" || model.bookmarks.cursor != 1 {
+		t.Fatalf("sorted bookmark state = cursor %d, bookmarks %#v", model.bookmarks.cursor, model.config.Bookmarks)
+	}
+}
+
+func TestBookmarkCanBeAssignedToAGroup(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.config.Bookmarks = []config.Bookmark{
+		{Name: "Home", Location: directory},
+		{Name: "NAS", Group: "Work", Location: "ftpes://nas.example/logs"},
+	}
+	model.config.SortBookmarks()
+	model.modal = modalBookmarks
+	model.bookmarks.cursor = 1
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if model.modal != modalPrompt || model.prompt.action != promptBookmarkGroup || model.prompt.pendingRaw != "Home" {
+		t.Fatalf("group prompt = modal %v, action %v, pending %q", model.modal, model.prompt.action, model.prompt.pendingRaw)
+	}
+	model.prompt.value = []rune("Work")
+	model.prompt.cursor = len(model.prompt.value)
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.modal != modalBookmarks || model.config.Bookmarks[1].Name != "Home" || model.config.Bookmarks[1].Group != "Work" {
+		t.Fatalf("assigned group state = modal %v, cursor %d, bookmarks %#v", model.modal, model.bookmarks.cursor, model.config.Bookmarks)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Bookmarks) != 2 || loaded.Bookmarks[1].Group != "Work" {
+		t.Fatalf("persisted groups = %#v", loaded.Bookmarks)
+	}
+	view := model.renderModal(100, 24)
+	if strings.Count(view, "▾ Work") != 1 || strings.Contains(view, "▾ Ungrouped") {
+		t.Fatalf("grouped bookmark list is incorrect:\n%s", view)
 	}
 }
 

@@ -641,12 +641,24 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.bookmarks.cursor = max(0, m.bookmarks.cursor-1)
 		case "down", "j":
 			m.bookmarks.cursor = min(len(m.config.Bookmarks)-1, m.bookmarks.cursor+1)
+		case "alt+up":
+			m.moveBookmark(-1)
+		case "alt+down":
+			m.moveBookmark(1)
+		case "s":
+			m.sortBookmarks()
 		case "a":
 			m.startPrompt("FTP, FTPES/FTPS, SFTP or SMB URL", "", promptLocation, false)
 		case "e":
 			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
 				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
 				m.startPrompt("Connection display name", bookmark.Name, promptBookmarkDisplayName, false)
+				m.prompt.pendingRaw = bookmark.Name
+			}
+		case "g":
+			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
+				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
+				m.startPrompt("Bookmark group (empty = Ungrouped)", bookmark.Group, promptBookmarkGroup, false)
 				m.prompt.pendingRaw = bookmark.Name
 			}
 		case "d":
@@ -674,6 +686,52 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) moveBookmark(delta int) {
+	if m.bookmarks.cursor < 0 || m.bookmarks.cursor >= len(m.config.Bookmarks) {
+		return
+	}
+	previous := append([]config.Bookmark(nil), m.config.Bookmarks...)
+	oldIndex := m.bookmarks.cursor
+	newIndex := m.config.MoveBookmark(oldIndex, delta)
+	if newIndex == oldIndex {
+		target := oldIndex + delta
+		if target >= 0 && target < len(m.config.Bookmarks) &&
+			!strings.EqualFold(m.config.Bookmarks[oldIndex].Group, m.config.Bookmarks[target].Group) {
+			m.setStatus("Use g to move a bookmark to another group", false)
+		}
+		return
+	}
+	if err := m.config.Save(); err != nil {
+		m.config.Bookmarks = previous
+		m.setStatus("Save bookmark order: "+err.Error(), true)
+		return
+	}
+	m.bookmarks.cursor = newIndex
+	m.setStatus("Bookmark order saved", false)
+}
+
+func (m *Model) sortBookmarks() {
+	if len(m.config.Bookmarks) == 0 {
+		return
+	}
+	m.bookmarks.cursor = max(0, min(len(m.config.Bookmarks)-1, m.bookmarks.cursor))
+	selectedName := m.config.Bookmarks[m.bookmarks.cursor].Name
+	previous := append([]config.Bookmark(nil), m.config.Bookmarks...)
+	m.config.SortBookmarks()
+	if err := m.config.Save(); err != nil {
+		m.config.Bookmarks = previous
+		m.setStatus("Save bookmark order: "+err.Error(), true)
+		return
+	}
+	for index, bookmark := range m.config.Bookmarks {
+		if bookmark.Name == selectedName {
+			m.bookmarks.cursor = index
+			break
+		}
+	}
+	m.setStatus("Bookmarks sorted by group, protocol, and name", false)
+}
+
 func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	prompt := &m.prompt
 	if prompt.checkboxVisible {
@@ -693,7 +751,7 @@ func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key.String() {
 	case "esc":
-		if prompt.action == promptBookmarkDisplayName {
+		if prompt.action == promptBookmarkDisplayName || prompt.action == promptBookmarkGroup {
 			m.modal, m.prompt = modalBookmarks, promptState{}
 			return m, nil
 		}
@@ -818,6 +876,36 @@ func (m *Model) submitPrompt(action promptAction, value, pending string, optionC
 				break
 			}
 		}
+	case promptBookmarkGroup:
+		previousBookmarks := append([]config.Bookmark(nil), m.config.Bookmarks...)
+		index := -1
+		for bookmarkIndex, bookmark := range m.config.Bookmarks {
+			if strings.EqualFold(bookmark.Name, pending) {
+				index = bookmarkIndex
+				break
+			}
+		}
+		if index < 0 {
+			m.setStatus("Bookmark no longer exists", true)
+			m.modal = modalBookmarks
+			return nil
+		}
+		m.bookmarks.cursor = m.config.SetBookmarkGroup(index, value)
+		if err := m.config.Save(); err != nil {
+			m.config.Bookmarks = previousBookmarks
+			for bookmarkIndex, bookmark := range m.config.Bookmarks {
+				if strings.EqualFold(bookmark.Name, pending) {
+					m.bookmarks.cursor = bookmarkIndex
+					break
+				}
+			}
+			m.setStatus("Save bookmark group: "+err.Error(), true)
+		} else if value == "" {
+			m.setStatus("Moved "+pending+" to Ungrouped", false)
+		} else {
+			m.setStatus("Moved "+pending+" to group "+value, false)
+		}
+		m.modal = modalBookmarks
 	}
 	return nil
 }

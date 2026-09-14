@@ -59,6 +59,7 @@ const (
 	promptBookmarkName
 	promptRemoteDirectory
 	promptBookmarkDisplayName
+	promptBookmarkGroup
 )
 
 type promptState struct {

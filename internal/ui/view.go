@@ -245,7 +245,7 @@ var footerShortcuts = []shortcutHint{
 	{"F5", "Copy/Restore"}, {"F6", "Move"}, {"F7", "Mkdir"}, {"F8", "Trash/Delete"},
 	{"F9", "Terminal"}, {"F10", "Quit"}, {"F11", "PrevTab"}, {"F12", "NextTab"},
 	{"Ctrl+N", "Connections"}, {"Ctrl+L", "Location"}, {"Ctrl+B", "Bookmark"},
-	{"Ctrl+R", "Refresh"}, {"Alt+F5", "Pack"}, {"Alt+F6", "Extract"}, {"Alt+U", "Upload"},
+	{"Ctrl+R", "Refresh"}, {"Alt+F5", "Pack"}, {"Alt+F6", "Extract"},
 	{"Alt+R", "RecycleBin"},
 }
 
@@ -302,19 +302,30 @@ func (m *Model) renderModal(width, height int) string {
 		return modalStyle.Width(modalWidth).Render(strings.Join(rows, "\n"))
 	case modalBookmarks:
 		var rows []string
-		rows = append(rows, "Connections", "")
+		rows = append(rows, "Bookmarks and connections", "")
 		if len(m.config.Bookmarks) == 0 {
 			rows = append(rows, mutedStyle.Render("No saved connections"))
 		}
+		lastGroup := "\x00"
 		for index, bookmark := range m.config.Bookmarks {
-			line := fmt.Sprintf("%-14s %s", connectionProtocol(bookmark.Location), bookmark.Name)
+			group := bookmark.Group
+			if group == "" {
+				group = "Ungrouped"
+			}
+			if lastGroup == "\x00" || !strings.EqualFold(lastGroup, group) {
+				rows = append(rows, mutedStyle.Render("▾ "+group))
+				lastGroup = group
+			}
+			line := fmt.Sprintf("  %-12s %s", connectionProtocol(bookmark.Location), bookmark.Name)
 			line = truncateEnd(line, modalWidth-6)
 			if index == m.bookmarks.cursor {
 				line = cursorStyle.Width(modalWidth - 6).Render(line)
 			}
 			rows = append(rows, line)
 		}
-		rows = append(rows, "", "Enter connects · a adds · e edits name · d deletes · Esc closes")
+		rows = append(rows, "",
+			"Enter opens · a adds · e renames · g sets group · d deletes",
+			"Alt+↑/↓ reorders in group · s sorts all · Esc closes")
 		return modalStyle.Width(modalWidth).Render(strings.Join(rows, "\n"))
 	}
 	return ""
@@ -372,7 +383,10 @@ var helpBindings = []helpBinding{
 	{"d (Open With)", "Set default app and open"},
 	{"a (Connections)", "Add a connection URL"},
 	{"e (Connections)", "Edit connection display name"},
+	{"g (Bookmarks)", "Set highlighted bookmark group"},
 	{"d (Connections)", "Delete highlighted bookmark"},
+	{"Alt+Up / Alt+Down (Bookmarks)", "Move highlighted bookmark"},
+	{"s (Bookmarks)", "Sort group/protocol/name"},
 	{"Esc / c (Connections)", "Close connection bookmarks"},
 	{"Left (prompt)", "Move the text cursor left"},
 	{"Right (prompt)", "Move the text cursor right"},

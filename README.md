@@ -138,6 +138,12 @@ also accepted instead of the `DOMAIN;user` form.
 | `Ctrl+R` | Refresh active pane |
 | `F1` | Help |
 
+Inside the bookmark selector, press `g` to assign the highlighted bookmark to
+a named group; submit an empty name to move it back to **Ungrouped**. Groups
+are shown as separate sections. `Alt+Up` and `Alt+Down` move the highlighted
+bookmark inside its group and save the new order. Press `s` to sort all
+bookmarks by group, protocol, and display name.
+
 Typing printable characters while a file pane is focused immediately filters
 that pane to names containing the typed text, case-insensitively. The active
 query and match count appear in the bottom status row. `Backspace` edits the
@@ -205,7 +211,9 @@ password prompt opens. Press `d` in the connection list to delete the
 highlighted bookmark, or `e` to edit its display name. The list shows only the
 protocol and that display name; connection details remain stored but hidden
 from the selector. Bookmarks always save the protocol, host, username,
-port, and path; saving the password is opt-in.
+port, and path; saving the password is opt-in. Press `g` to set or change the
+highlighted bookmark's group. Use `Alt+Up` / `Alt+Down` for a custom persistent
+order within that group, or `s` to sort by group, protocol, and name.
 
 Press `Ctrl+Shift+N` to close the active network session and return every tab
 using that same session to its last local directory.
