@@ -14,6 +14,7 @@ import (
 
 	"tui-commander/internal/config"
 	"tui-commander/internal/openwith"
+	"tui-commander/internal/theme"
 	"tui-commander/internal/trash"
 	"tui-commander/internal/vfs"
 )
@@ -194,7 +195,7 @@ func New(options Options) (*Model, error) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.loadPaneCmd(0), m.loadPaneCmd(1), watchTickCmd())
+	return tea.Batch(m.loadPaneCmd(0), m.loadPaneCmd(1), watchTickCmd(), theme.Watch())
 }
 
 func (m *Model) close() {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"tui-commander/internal/theme"
 	"tui-commander/internal/vfs"
 )
 
@@ -25,20 +26,43 @@ var (
 	colorRed     = lipgloss.Color("#f38ba8")
 	colorMauve   = lipgloss.Color("#cba6f7")
 
-	baseStyle      = lipgloss.NewStyle().Background(colorBase).Foreground(colorText)
-	pathStyle      = lipgloss.NewStyle().Foreground(colorSubtext).Background(colorSurface)
-	focusedPath    = lipgloss.NewStyle().Bold(true).Foreground(colorBase).Background(colorBlue)
-	selectedStyle  = lipgloss.NewStyle().Foreground(colorGreen).Background(colorBase)
-	cursorStyle    = lipgloss.NewStyle().Foreground(colorBase).Background(colorBlue)
-	directoryStyle = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Background(colorBase)
-	mutedStyle     = lipgloss.NewStyle().Foreground(colorOverlay).Background(colorBase)
-	errorStyle     = lipgloss.NewStyle().Foreground(colorRed).Background(colorMantle)
-	statusStyle    = lipgloss.NewStyle().Foreground(colorText).Background(colorMantle)
-	keyStyle       = lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Background(colorMantle)
-	modalStyle     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorMauve).Padding(1, 2).Background(colorMantle).Foreground(colorText)
-	frameStyle     = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#45475a")).Background(colorBase)
-	terminalHeader = lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Background(colorSurface)
+	baseStyle      lipgloss.Style
+	pathStyle      lipgloss.Style
+	focusedPath    lipgloss.Style
+	selectedStyle  lipgloss.Style
+	cursorStyle    lipgloss.Style
+	directoryStyle lipgloss.Style
+	mutedStyle     lipgloss.Style
+	errorStyle     lipgloss.Style
+	statusStyle    lipgloss.Style
+	keyStyle       lipgloss.Style
+	modalStyle     lipgloss.Style
+	frameStyle     lipgloss.Style
+	terminalHeader lipgloss.Style
 )
+
+func init() { applyTheme(theme.Current()) }
+
+func applyTheme(p theme.Palette) {
+	colorBase, colorMantle, colorSurface = p.Base, p.Mantle, p.Surface0
+	colorOverlay, colorText, colorSubtext = p.Overlay0, p.Text, p.Subtext0
+	colorBlue, colorGreen, colorYellow = p.Blue, p.Green, p.Yellow
+	colorRed, colorMauve = p.Red, p.Mauve
+
+	baseStyle = lipgloss.NewStyle().Background(colorBase).Foreground(colorText)
+	pathStyle = lipgloss.NewStyle().Foreground(colorSubtext).Background(colorSurface)
+	focusedPath = lipgloss.NewStyle().Bold(true).Foreground(p.OnAccent).Background(colorMauve)
+	selectedStyle = lipgloss.NewStyle().Foreground(colorGreen).Background(colorBase)
+	cursorStyle = lipgloss.NewStyle().Foreground(p.OnAccent).Background(colorMauve)
+	directoryStyle = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Background(colorBase)
+	mutedStyle = lipgloss.NewStyle().Foreground(colorOverlay).Background(colorBase)
+	errorStyle = lipgloss.NewStyle().Foreground(colorRed).Background(colorMantle)
+	statusStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorMantle)
+	keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Background(colorMantle)
+	modalStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorMauve).Padding(1, 2).Background(colorMantle).Foreground(colorText)
+	frameStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(p.Surface1).Background(colorBase)
+	terminalHeader = lipgloss.NewStyle().Bold(true).Foreground(colorMauve).Background(colorSurface)
+}
 
 func (m *Model) View() string {
 	if m.width <= 0 || m.height <= 0 {

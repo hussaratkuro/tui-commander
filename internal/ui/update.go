@@ -17,12 +17,17 @@ import (
 	"tui-commander/internal/archive"
 	"tui-commander/internal/config"
 	"tui-commander/internal/openwith"
+	"tui-commander/internal/theme"
 	"tui-commander/internal/trash"
 	"tui-commander/internal/vfs"
 )
 
 func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case theme.ChangedMsg:
+		applyTheme(message.Palette)
+		return m, theme.Watch()
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = message.Width, message.Height
 		if err := m.resizeTerminal(); err != nil {

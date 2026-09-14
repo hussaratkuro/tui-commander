@@ -1,8 +1,9 @@
 # tui-commander
 
 `tui-commander` is a keyboard-first, two-pane file manager for local files,
-FTP, FTPES/FTPS, SFTP, and SMB. It uses Double Commander-style file-operation keys and a
-Catppuccin Mocha terminal interface.
+FTP, FTPES/FTPS, SFTP, and SMB. It uses Double Commander-style file-operation
+keys and follows the active HyDE/Wallbash terminal palette, with Catppuccin
+Mocha as a fallback.
 
 ## Features
 
@@ -39,6 +40,10 @@ Or build without installing:
 go build .
 ./tui-commander
 ```
+
+The active palette is read from `~/.cache/hyde/wallbash/shell-colors` and is
+refreshed every two seconds while the app is open. Set
+`TUI_THEME=catppuccin` to force the built-in fallback palette.
 
 ## Starting locations
 
