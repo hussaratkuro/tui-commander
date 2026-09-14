@@ -91,3 +91,70 @@ func TestTerminalEnvironmentOverridesTerminalType(t *testing.T) {
 		t.Fatalf("terminal environment = %#v", environment)
 	}
 }
+
+func TestReopeningTerminalFollowsPaneDirectory(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	first, second := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: first, Right: first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+
+	model.toggleTerminal()
+	original := model.terminal
+	if original == nil || !sameDirectory(original.cwd, first) {
+		t.Fatalf("terminal did not open in %q: %#v", first, original)
+	}
+
+	model.toggleTerminal() // hide
+	model.toggleTerminal() // show again without moving: the shell survives
+	if model.terminal != original {
+		t.Fatal("terminal session was replaced although the directory did not change")
+	}
+
+	model.toggleTerminal() // hide
+	model.panes[0].location.Path = second
+	model.toggleTerminal() // show after navigating elsewhere
+	if model.terminal == original {
+		t.Fatal("terminal session was reused although the pane moved to another directory")
+	}
+	if !sameDirectory(model.terminal.cwd, second) {
+		t.Fatalf("reopened terminal cwd = %q, want %q", model.terminal.cwd, second)
+	}
+	if !model.terminalVisible {
+		t.Fatal("terminal should be visible after reopening")
+	}
+}
+
+func TestReopeningTerminalReplacesShellThatChangedDirectory(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	first, second := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: first, Right: first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+
+	model.toggleTerminal()
+	original := model.terminal
+	original.emulator.SendText("cd '" + second + "'\n")
+	deadline := time.Now().Add(5 * time.Second)
+	for !sameDirectory(original.workingDirectory(), second) {
+		if time.Now().After(deadline) {
+			t.Fatalf("shell did not change directory: %q", original.workingDirectory())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	model.toggleTerminal() // hide
+	model.toggleTerminal() // pane is still in first, the shell is not
+	if model.terminal == original {
+		t.Fatal("terminal session was reused although the shell left the pane directory")
+	}
+	if !sameDirectory(model.terminal.cwd, first) {
+		t.Fatalf("reopened terminal cwd = %q, want %q", model.terminal.cwd, first)
+	}
+}

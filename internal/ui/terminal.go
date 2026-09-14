@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -134,24 +135,12 @@ func (m *Model) toggleTerminal() tea.Cmd {
 		return nil
 	}
 	m.terminalVisible = true
-	if m.terminal == nil || m.terminal.exited {
-		if m.terminal != nil {
-			m.terminal.close()
-		}
-		cwd := m.terminalWorkingDirectory()
-		width, height := m.terminalViewportSize()
-		session, err := startTerminalSession(cwd, width, height)
-		if err != nil {
-			m.terminalVisible = false
-			m.setStatus("Open terminal: "+err.Error(), true)
-			return nil
-		}
-		m.terminal = session
-		m.setStatus("Terminal opened in "+cwd, false)
-		for _, pane := range m.panes {
-			pane.clamp(m.visibleRows())
-		}
-		return tea.Batch(readTerminalCmd(session), waitTerminalCmd(session))
+	cwd := m.terminalWorkingDirectory()
+	// The shell is kept while hidden, but showing the terminal must always land
+	// in the directory tui-commander currently displays. When the panes moved on
+	// (or the shell itself changed directory) a fresh session replaces the old one.
+	if m.terminal == nil || m.terminal.exited || !sameDirectory(m.terminal.workingDirectory(), cwd) {
+		return m.openTerminal(cwd)
 	}
 	if err := m.resizeTerminal(); err != nil {
 		m.setStatus("Resize terminal: "+err.Error(), true)
@@ -162,6 +151,51 @@ func (m *Model) toggleTerminal() tea.Cmd {
 		pane.clamp(m.visibleRows())
 	}
 	return nil
+}
+
+func (m *Model) openTerminal(cwd string) tea.Cmd {
+	if m.terminal != nil {
+		m.terminal.close()
+		m.terminal = nil
+	}
+	width, height := m.terminalViewportSize()
+	session, err := startTerminalSession(cwd, width, height)
+	if err != nil {
+		m.terminalVisible = false
+		m.setStatus("Open terminal: "+err.Error(), true)
+		return nil
+	}
+	m.terminal = session
+	m.setStatus("Terminal opened in "+cwd, false)
+	for _, pane := range m.panes {
+		pane.clamp(m.visibleRows())
+	}
+	return tea.Batch(readTerminalCmd(session), waitTerminalCmd(session))
+}
+
+// workingDirectory reports where the shell currently is, falling back to the
+// directory it was started in when the live location cannot be determined.
+func (s *terminalSession) workingDirectory() string {
+	if s.command != nil && s.command.Process != nil {
+		if directory, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", s.command.Process.Pid)); err == nil {
+			return directory
+		}
+	}
+	return s.cwd
+}
+
+func sameDirectory(a, b string) bool {
+	return canonicalDirectory(a) == canonicalDirectory(b)
+}
+
+func canonicalDirectory(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	return filepath.Clean(path)
 }
 
 func (m *Model) terminalWorkingDirectory() string {

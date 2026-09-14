@@ -175,9 +175,11 @@ through `xdg-mime`, so desktop applications and other file managers see it too.
 
 When the integrated terminal is visible it owns the keyboard, including
 `Ctrl+C`, function keys, and pasted text. Press `F9` to return keyboard focus to
-the file panes without ending the shell session. A newly created terminal starts
-in the active local pane; if both panes are remote, it starts in tui-commander's
-working directory.
+the file panes; the shell keeps running in the background. Showing the terminal
+again always lands in the active local pane's directory: if the panes moved on
+while it was hidden, or the shell itself changed directory, the old shell is
+replaced by a new one started there. If both panes are remote, the terminal
+starts in tui-commander's working directory.
 
 ## Synchronizing directories
 
