@@ -324,9 +324,13 @@ func (m *Model) renderModal(width, height int) string {
 			rows = append(rows, line)
 		}
 		rows = append(rows, "",
-			"Enter opens · a adds · e renames · g sets group · d deletes",
+			"Enter opens · a adds · e renames · g group · v gopass · d deletes",
 			"Alt+↑/↓ reorders in group · s sorts all · Esc closes")
 		return modalStyle.Width(modalWidth).Render(strings.Join(rows, "\n"))
+	case modalCommands:
+		return m.renderCommandPalette(modalWidth, height)
+	case modalSync:
+		return m.renderSyncCenter(modalWidth, height)
 	}
 	return ""
 }
@@ -366,6 +370,8 @@ var helpBindings = []helpBinding{
 	{"Backspace (no filter)", "Open the parent directory"},
 	{"Esc (filter active)", "Clear the quick filter"},
 	{"Ctrl+H", "Toggle hidden files"},
+	{"Ctrl+Shift+P / Ctrl+P", "Open fuzzy command palette"},
+	{"Ctrl+S", "Open directory sync center"},
 	{"Ctrl+N / Alt+C", "Open connection bookmarks"},
 	{"Ctrl+Shift+N", "Disconnect active network"},
 	{"Ctrl+L", "Enter path or connection URL"},
@@ -384,6 +390,7 @@ var helpBindings = []helpBinding{
 	{"a (Connections)", "Add a connection URL"},
 	{"e (Connections)", "Edit connection display name"},
 	{"g (Bookmarks)", "Set highlighted bookmark group"},
+	{"v (Bookmarks)", "Link gopass credential"},
 	{"d (Connections)", "Delete highlighted bookmark"},
 	{"Alt+Up / Alt+Down (Bookmarks)", "Move highlighted bookmark"},
 	{"s (Bookmarks)", "Sort group/protocol/name"},

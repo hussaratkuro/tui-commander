@@ -544,6 +544,46 @@ func TestBookmarkCanBeAssignedToAGroup(t *testing.T) {
 	}
 }
 
+func TestBookmarkCanLinkGopassCredential(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.config.Bookmarks = []config.Bookmark{{
+		Name: "NAS", Location: "ftpes://alice@nas.example", Password: "plaintext",
+	}}
+	model.modal = modalBookmarks
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if model.modal != modalPrompt || model.prompt.action != promptBookmarkCredential || model.prompt.pendingRaw != "NAS" {
+		t.Fatalf("credential prompt = modal %v, action %v, pending %q", model.modal, model.prompt.action, model.prompt.pendingRaw)
+	}
+	model.prompt.value = []rune("Office NAS")
+	model.prompt.cursor = len(model.prompt.value)
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	bookmark := model.config.Bookmarks[0]
+	if model.modal != modalBookmarks || bookmark.CredentialRef != "Office NAS" || bookmark.Password != "" {
+		t.Fatalf("linked credential bookmark = modal %v, bookmark %#v", model.modal, bookmark)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.modal != modalPrompt || model.prompt.action != promptCredentialPassword || model.pendingCredential.ref != "Office NAS" {
+		t.Fatalf("vault password prompt = modal %v, action %v, pending %#v", model.modal, model.prompt.action, model.pendingCredential)
+	}
+}
+
+func TestLocationUsesCredentialUsernameOnlyWhenMissing(t *testing.T) {
+	if got := locationWithCredentialUsername("ftpes://nas.example/logs", "alice"); got != "ftpes://alice@nas.example/logs" {
+		t.Fatalf("location with credential username = %q", got)
+	}
+	if got := locationWithCredentialUsername("sftp://bob@host.example/home", "alice"); got != "sftp://bob@host.example/home" {
+		t.Fatalf("existing username was replaced: %q", got)
+	}
+}
+
 type closingRemoteBackend struct {
 	*vfs.Local
 	closed bool

@@ -45,6 +45,8 @@ const (
 	modalConfirm
 	modalApplications
 	modalBookmarks
+	modalCommands
+	modalSync
 )
 
 type promptAction uint8
@@ -60,6 +62,8 @@ const (
 	promptRemoteDirectory
 	promptBookmarkDisplayName
 	promptBookmarkGroup
+	promptBookmarkCredential
+	promptCredentialPassword
 )
 
 type promptState struct {
@@ -112,6 +116,14 @@ type certificateTrustState struct {
 	fingerprint   string
 }
 
+type credentialRequest struct {
+	index        int
+	bookmarkName string
+	location     string
+	ref          string
+	master       string
+}
+
 type remoteFile struct {
 	localPath  string
 	backend    vfs.Backend
@@ -124,35 +136,40 @@ type remoteFile struct {
 }
 
 type Model struct {
-	width, height   int
-	panes           [2]*pane
-	tabs            [2][]*pane
-	activeTab       [2]int
-	backends        []vfs.Backend
-	focus           int
-	modal           modalKind
-	prompt          promptState
-	confirm         confirmState
-	applications    applicationState
-	bookmarks       bookmarkState
-	pendingTrust    certificateTrustState
-	helpOffset      int
-	config          config.Config
-	status          string
-	statusError     bool
-	busy            bool
-	busyLabel       string
-	busyFrame       int
-	cancel          context.CancelFunc
-	progress        vfs.TransferProgress
-	progressCh      chan vfs.TransferProgress
-	tempRoot        string
-	remoteFiles     []*remoteFile
-	terminal        *terminalSession
-	terminalVisible bool
-	lastClickPane   int
-	lastClickRow    int
-	lastClickAt     time.Time
+	width, height     int
+	panes             [2]*pane
+	tabs              [2][]*pane
+	activeTab         [2]int
+	backends          []vfs.Backend
+	focus             int
+	modal             modalKind
+	prompt            promptState
+	confirm           confirmState
+	applications      applicationState
+	bookmarks         bookmarkState
+	pendingTrust      certificateTrustState
+	pendingCredential credentialRequest
+	credentialMaster  string
+	credentialUntil   time.Time
+	helpOffset        int
+	config            config.Config
+	status            string
+	statusError       bool
+	busy              bool
+	busyLabel         string
+	busyFrame         int
+	cancel            context.CancelFunc
+	progress          vfs.TransferProgress
+	progressCh        chan vfs.TransferProgress
+	tempRoot          string
+	remoteFiles       []*remoteFile
+	terminal          *terminalSession
+	terminalVisible   bool
+	lastClickPane     int
+	lastClickRow      int
+	lastClickAt       time.Time
+	commands          commandPaletteState
+	sync              syncCenterState
 }
 
 func New(options Options) (*Model, error) {
@@ -259,6 +276,13 @@ type remoteUploadedMsg struct {
 type watchTickMsg struct{}
 type busyTickMsg struct{}
 type progressMsg struct{ progress vfs.TransferProgress }
+
+type credentialResolvedMsg struct {
+	request  credentialRequest
+	username string
+	password string
+	err      error
+}
 
 func (m *Model) loadPaneCmd(index int) tea.Cmd {
 	target := m.panes[index]

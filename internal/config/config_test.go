@@ -126,6 +126,31 @@ func TestBookmarkGroupsArePersistedAndKeptTogether(t *testing.T) {
 	}
 }
 
+func TestBookmarkCredentialReferenceReplacesPlaintextPassword(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Config{Bookmarks: []Bookmark{{
+		Name: "NAS", Group: "Work", Location: "ftpes://alice@nas.example", Password: "plaintext",
+	}}}
+	cfg.SetBookmarkCredential(0, "nas-credential-id")
+	if cfg.Bookmarks[0].Password != "" || cfg.Bookmarks[0].CredentialRef != "nas-credential-id" {
+		t.Fatalf("linked bookmark = %#v", cfg.Bookmarks[0])
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Bookmarks) != 1 || loaded.Bookmarks[0].CredentialRef != "nas-credential-id" || loaded.Bookmarks[0].Password != "" {
+		t.Fatalf("persisted credential reference = %#v", loaded.Bookmarks)
+	}
+	loaded.SetBookmarkCredential(0, "")
+	if loaded.Bookmarks[0].CredentialRef != "" {
+		t.Fatalf("credential reference was not removed: %#v", loaded.Bookmarks[0])
+	}
+}
+
 func TestSaveAndLoadPreservesCustomBookmarkOrder(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := Config{Bookmarks: []Bookmark{

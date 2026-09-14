@@ -12,10 +12,11 @@ import (
 )
 
 type Bookmark struct {
-	Name     string `json:"name"`
-	Group    string `json:"group,omitempty"`
-	Location string `json:"location"`
-	Password string `json:"password,omitempty"`
+	Name          string `json:"name"`
+	Group         string `json:"group,omitempty"`
+	Location      string `json:"location"`
+	Password      string `json:"password,omitempty"`
+	CredentialRef string `json:"credential_ref,omitempty"`
 }
 
 type Config struct {
@@ -92,6 +93,9 @@ func (c *Config) AddBookmark(bookmark Bookmark) {
 			if bookmark.Group == "" {
 				bookmark.Group = c.Bookmarks[i].Group
 			}
+			if bookmark.CredentialRef == "" && bookmark.Password == "" {
+				bookmark.CredentialRef = c.Bookmarks[i].CredentialRef
+			}
 			c.Bookmarks[i] = bookmark
 			c.normalize()
 			return
@@ -99,6 +103,18 @@ func (c *Config) AddBookmark(bookmark Bookmark) {
 	}
 	c.Bookmarks = append(c.Bookmarks, bookmark)
 	c.normalize()
+}
+
+// SetBookmarkCredential links a bookmark to an encrypted gopass entry. An
+// encrypted reference and a plaintext saved password are mutually exclusive.
+func (c *Config) SetBookmarkCredential(index int, ref string) {
+	if index < 0 || index >= len(c.Bookmarks) {
+		return
+	}
+	c.Bookmarks[index].CredentialRef = strings.TrimSpace(ref)
+	if c.Bookmarks[index].CredentialRef != "" {
+		c.Bookmarks[index].Password = ""
+	}
 }
 
 func (c *Config) RemoveBookmark(index int) {
@@ -201,6 +217,10 @@ func (c *Config) normalize() {
 	for _, bookmark := range c.Bookmarks {
 		bookmark.Name = strings.TrimSpace(bookmark.Name)
 		bookmark.Group = strings.TrimSpace(bookmark.Group)
+		bookmark.CredentialRef = strings.TrimSpace(bookmark.CredentialRef)
+		if bookmark.CredentialRef != "" {
+			bookmark.Password = ""
+		}
 		bookmark.Location = SanitizeLocation(bookmark.Location)
 		if bookmark.Name != "" && bookmark.Location != "" {
 			clean = append(clean, bookmark)

@@ -21,11 +21,13 @@ Mocha as a fallback.
 - Toggleable integrated terminal panel that starts in the active local directory.
 - Instant type-to-filter, `fzf` integration, hidden-file toggling, and Git status
   summaries in local pane headers.
-- Saved connection bookmarks with optional password persistence in the private
-  configuration file.
+- Saved connection bookmarks with optional password persistence or encrypted
+  credential references resolved through `gopass`.
 - Remote files open through a managed local copy; changed copies can be uploaded
   with `Alt+U`.
 - Launch `merger` for the current local entry in both panes.
+- Dry-run directory sync center with one-way/two-way plans, optional SHA-256
+  comparison, resumable queues, and failed-item retry.
 
 ## Build and install
 
@@ -136,6 +138,8 @@ also accepted instead of the `DOMAIN;user` form.
 | `Alt+R` | Open or close the Recycle Bin in the active pane |
 | `Alt+U` | Upload a changed remote file opened locally |
 | `Ctrl+R` | Refresh active pane |
+| `Ctrl+S` | Open the directory sync and transfer center |
+| `Ctrl+Shift+P` / `Ctrl+P` | Open the fuzzy command palette |
 | `F1` | Help |
 
 Inside the bookmark selector, press `g` to assign the highlighted bookmark to
@@ -143,6 +147,12 @@ a named group; submit an empty name to move it back to **Ungrouped**. Groups
 are shown as separate sections. `Alt+Up` and `Alt+Down` move the highlighted
 bookmark inside its group and save the new order. Press `s` to sort all
 bookmarks by group, protocol, and display name.
+
+Press `v` on a bookmark to link a gopass entry by its permanent ID or unique
+title. Opening it asks for the gopass vault password, resolves the credential
+through `gopass credential`, and caches only the vault unlock secret in memory
+for 15 minutes. Linking a credential removes any plaintext saved password;
+submitting an empty reference unlinks it.
 
 Typing printable characters while a file pane is focused immediately filters
 that pane to names containing the typed text, case-insensitively. The active
@@ -168,6 +178,20 @@ When the integrated terminal is visible it owns the keyboard, including
 the file panes without ending the shell session. A newly created terminal starts
 in the active local pane; if both panes are remote, it starts in tui-commander's
 working directory.
+
+## Synchronizing directories
+
+Open the two roots in the left and right panes, then press `Ctrl+S`. The first
+screen is always a dry-run plan; it does not copy anything and never deletes
+destination-only entries. Use `Left`/`Right` (or `d`) to choose left-to-right,
+right-to-left, or two-way sync. Press `c` to replace the quick size/timestamp
+comparison with SHA-256 content checks, then `Enter` to run the displayed
+queue.
+
+Completed queue items stay marked, so `Enter` resumes pending work after a
+cancellation. Press `r` to retry only failed items and `s` to rescan both
+trees. Two-way sync copies the newer version; equal-timestamp differences and
+file/directory type mismatches are shown as conflicts and deliberately skipped.
 
 ## Creating and extracting archives
 
@@ -211,7 +235,8 @@ password prompt opens. Press `d` in the connection list to delete the
 highlighted bookmark, or `e` to edit its display name. The list shows only the
 protocol and that display name; connection details remain stored but hidden
 from the selector. Bookmarks always save the protocol, host, username,
-port, and path; saving the password is opt-in. Press `g` to set or change the
+port, and path; saving the password is opt-in. Press `v` to replace that saved
+password with an encrypted gopass credential reference. Press `g` to change the
 highlighted bookmark's group. Use `Alt+Up` / `Alt+Down` for a custom persistent
 order within that group, or `s` to sort by group, protocol, and name.
 

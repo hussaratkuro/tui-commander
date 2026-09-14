@@ -57,6 +57,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case fuzzyFinishedMsg:
 		return m.handleFuzzyFinished(message)
+	case syncScannedMsg:
+		m.stopBusy()
+		return m.handleSyncScanned(message)
+	case syncFinishedMsg:
+		m.stopBusy()
+		return m.handleSyncFinished(message)
 	case paneLoadedMsg:
 		pane := message.pane
 		if pane.location.Path != message.path {
@@ -170,6 +176,20 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setStatus("Uploaded edited file to "+message.file.remotePath, false)
 		return m, m.loadPaneCmd(m.focus)
+	case credentialResolvedMsg:
+		m.stopBusy()
+		if message.err != nil {
+			m.credentialMaster, m.credentialUntil = "", time.Time{}
+			m.modal = modalBookmarks
+			m.setStatus("gopass: "+message.err.Error(), true)
+			return m, nil
+		}
+		m.credentialMaster = message.request.master
+		m.credentialUntil = time.Now().Add(15 * time.Minute)
+		m.pendingCredential = credentialRequest{}
+		location := locationWithCredentialUsername(message.request.location, message.username)
+		m.busy, m.busyLabel = true, "Connecting"
+		return m, tea.Batch(connectCmd(message.request.index, location, message.password, false), busyTickCmd())
 	case appClosedMsg:
 		if message.err != nil {
 			m.setStatus("Open application: "+message.err.Error(), true)
@@ -296,6 +316,10 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "f1":
 		m.modal, m.helpOffset = modalHelp, 0
+	case "ctrl+p", "ctrl+shift+p":
+		m.openCommandPalette()
+	case "ctrl+s":
+		return m, m.openSyncCenter()
 	case "f3", "ctrl+f":
 		return m, m.startFuzzyFinder()
 	case "tab":
@@ -661,6 +685,12 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.startPrompt("Bookmark group (empty = Ungrouped)", bookmark.Group, promptBookmarkGroup, false)
 				m.prompt.pendingRaw = bookmark.Name
 			}
+		case "v":
+			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
+				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
+				m.startPrompt("gopass credential ID or unique title (empty = unlink)", bookmark.CredentialRef, promptBookmarkCredential, false)
+				m.prompt.pendingRaw = bookmark.Name
+			}
 		case "d":
 			if len(m.config.Bookmarks) > 0 {
 				m.config.RemoveBookmark(m.bookmarks.cursor)
@@ -672,6 +702,21 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
 				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
+				if bookmark.CredentialRef != "" {
+					request := credentialRequest{
+						index: m.focus, bookmarkName: bookmark.Name,
+						location: bookmark.Location, ref: bookmark.CredentialRef,
+					}
+					if m.credentialMaster != "" && time.Now().Before(m.credentialUntil) {
+						request.master = m.credentialMaster
+						m.modal = modalNone
+						m.busy, m.busyLabel = true, "Unlocking credential"
+						return m, tea.Batch(resolveCredentialCmd(request), busyTickCmd())
+					}
+					m.pendingCredential = request
+					m.startPrompt("gopass vault password", "", promptCredentialPassword, true)
+					return m, nil
+				}
 				if bookmark.Password != "" {
 					m.modal = modalNone
 					m.busy, m.busyLabel = true, "Connecting"
@@ -682,6 +727,10 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "c":
 			m.modal = modalNone
 		}
+	case modalCommands:
+		return m.updateCommandPalette(key)
+	case modalSync:
+		return m.updateSyncCenter(key)
 	}
 	return m, nil
 }
@@ -751,7 +800,11 @@ func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key.String() {
 	case "esc":
-		if prompt.action == promptBookmarkDisplayName || prompt.action == promptBookmarkGroup {
+		if prompt.action == promptBookmarkDisplayName || prompt.action == promptBookmarkGroup ||
+			prompt.action == promptBookmarkCredential || prompt.action == promptCredentialPassword {
+			if prompt.action == promptCredentialPassword {
+				m.pendingCredential = credentialRequest{}
+			}
 			m.modal, m.prompt = modalBookmarks, promptState{}
 			return m, nil
 		}
@@ -906,6 +959,43 @@ func (m *Model) submitPrompt(action promptAction, value, pending string, optionC
 			m.setStatus("Moved "+pending+" to group "+value, false)
 		}
 		m.modal = modalBookmarks
+	case promptBookmarkCredential:
+		previousBookmarks := append([]config.Bookmark(nil), m.config.Bookmarks...)
+		index := -1
+		for bookmarkIndex, bookmark := range m.config.Bookmarks {
+			if strings.EqualFold(bookmark.Name, pending) {
+				index = bookmarkIndex
+				break
+			}
+		}
+		if index < 0 {
+			m.setStatus("Bookmark no longer exists", true)
+			m.modal = modalBookmarks
+			return nil
+		}
+		m.config.SetBookmarkCredential(index, value)
+		if err := m.config.Save(); err != nil {
+			m.config.Bookmarks = previousBookmarks
+			m.setStatus("Save credential reference: "+err.Error(), true)
+		} else if value == "" {
+			m.setStatus("Removed gopass credential from "+pending, false)
+		} else {
+			m.setStatus("Linked "+pending+" to encrypted gopass credential", false)
+		}
+		m.bookmarks.cursor = index
+		m.modal = modalBookmarks
+	case promptCredentialPassword:
+		if value == "" || m.pendingCredential.ref == "" {
+			m.pendingCredential = credentialRequest{}
+			m.modal = modalBookmarks
+			m.setStatus("gopass vault password is required", true)
+			return nil
+		}
+		request := m.pendingCredential
+		request.master = value
+		m.pendingCredential = credentialRequest{}
+		m.busy, m.busyLabel = true, "Unlocking credential"
+		return tea.Batch(resolveCredentialCmd(request), busyTickCmd())
 	}
 	return nil
 }
