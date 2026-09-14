@@ -215,7 +215,7 @@ the other pane, press `Alt+F6`, and confirm with `Enter` or `y`.
    `Alt+C`.
 2. Press `a`, then enter a URL such as `ftp://alice@example.com`,
    `ftps://alice@example.com/incoming`,
-   `ftpes://alice@nas.ehazhub.hu:5021/?tls-server-name=ehaziroda.myqnapcloud.com`,
+   `ftpes://alice@ftp.example.com:5021/?tls-server-name=certificate.example.com`,
    `sftp://alice@example.com`, or `smb://WORKGROUP;alice@fileserver`.
 3. Enter the initial remote directory in the next field, such as `/incoming`,
    `/home/alice`, or `/Shared/folder` for SMB. A path already present in the
