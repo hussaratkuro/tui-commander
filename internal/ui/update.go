@@ -406,8 +406,6 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !pane.selected[entry.Path] {
 				delete(pane.selected, entry.Path)
 			}
-			pane.cursor++
-			pane.clamp(visible)
 		}
 	case "ctrl+a":
 		entries := pane.visibleEntries()
