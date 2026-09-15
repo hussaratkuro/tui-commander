@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,44 @@ func TestSaveAndLoadBookmarksWithoutPassword(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadSessionSanitizesLocationsAndActiveTabs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Config{Session: &Session{
+		Panes: [2]SessionPane{
+			{Tabs: []SessionTab{
+				{Location: "/srv/left"},
+				{Location: "ftp://alice:secret@example.com/files", LocalReturn: "/home/alice", ShowHidden: true},
+			}, ActiveTab: 99},
+			{Tabs: []SessionTab{{Location: "/srv/right"}}, ActiveTab: -2},
+		},
+		Focus: 7,
+	}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Session == nil {
+		t.Fatal("saved session was not loaded")
+	}
+	if loaded.Session.Focus != 1 || loaded.Session.Panes[0].ActiveTab != 1 || loaded.Session.Panes[1].ActiveTab != 0 {
+		t.Fatalf("normalized session = %#v", loaded.Session)
+	}
+	remote := loaded.Session.Panes[0].Tabs[1]
+	if remote.Location != "ftp://alice@example.com/files" || remote.LocalReturn != "/home/alice" || !remote.ShowHidden {
+		t.Fatalf("loaded remote session tab = %#v", remote)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "tui-commander", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret") {
+		t.Fatalf("session leaked password: %s", data)
+	}
+}
+
 func TestSaveAndLoadBookmarkWithOptInPassword(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
@@ -74,6 +113,26 @@ func TestSaveAndLoadBookmarkWithOptInPassword(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("password config mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestLocalBookmarkDropsPasswordAndCredentialReference(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Config{Bookmarks: []Bookmark{{
+		Name: "Local", Location: "/home/alice", Password: "unused", CredentialRef: "unused-gopass-entry",
+	}}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Bookmarks) != 1 || loaded.Bookmarks[0].Password != "" || loaded.Bookmarks[0].CredentialRef != "" {
+		t.Fatalf("local bookmark retained credentials: %#v", loaded.Bookmarks)
+	}
+	if !IsLocalLocation("file:///tmp") || !IsLocalLocation("/tmp") || IsLocalLocation("sftp://host/tmp") {
+		t.Fatal("local bookmark location detection is incorrect")
 	}
 }
 

@@ -8,8 +8,10 @@ import (
 )
 
 type Options struct {
-	Left  string
-	Right string
+	Left           string
+	Right          string
+	restoreSession bool
+	saveSession    bool
 }
 
 const Usage = `tui-commander - two-pane local and remote file manager
@@ -36,7 +38,7 @@ var errHelp = errors.New("help requested")
 func IsHelp(err error) bool { return errors.Is(err, errHelp) }
 
 func ParseArgs(args []string) (Options, error) {
-	var options Options
+	options := Options{restoreSession: len(args) == 0, saveSession: true}
 	var positional []string
 	for index := 0; index < len(args); index++ {
 		argument := args[index]

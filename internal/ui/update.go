@@ -243,6 +243,14 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
+		if m.modal == modalPrompt {
+			if editKey := promptUnknownControlKey(message); editKey != "" {
+				if !m.prompt.checkboxFocus {
+					editPromptText(&m.prompt, editKey)
+				}
+				return m, nil
+			}
+		}
 		return m, nil
 	}
 	if key.String() == "f9" && m.modal == modalNone && !m.busy {
@@ -266,12 +274,29 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleMouse(mouse tea.MouseEvent) (tea.Model, tea.Cmd) {
+	previousFocus := m.focus
 	index := 0
 	if mouse.X >= m.width/2 {
 		index = 1
 	}
 	m.focus = index
+	if mouse.Action == tea.MouseActionPress && previousFocus != index {
+		m.persistSessionState()
+	}
 	pane := m.panes[index]
+	if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress && mouse.Y == 2 {
+		contentWidth := max(1, m.width-2)
+		leftWidth := max(20, (contentWidth-1)/2)
+		paneWidth, paneStart := leftWidth, 1
+		if index == 1 {
+			paneWidth = max(20, contentWidth-leftWidth-1)
+			paneStart = leftWidth + 2
+		}
+		if tabIndex := m.tabAt(index, paneWidth, mouse.X-paneStart); tabIndex >= 0 {
+			return m, m.activateTab(index, tabIndex)
+		}
+		return m, nil
+	}
 	entries := pane.visibleEntries()
 	switch mouse.Button {
 	case tea.MouseButtonWheelUp:
@@ -324,13 +349,14 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.startFuzzyFinder()
 	case "tab":
 		m.focus = 1 - m.focus
+		m.persistSessionState()
 	case "ctrl+t":
 		return m, m.newTab(m.focus)
 	case "ctrl+w":
 		return m, m.closeTab(m.focus)
-	case "ctrl+tab", "ctrl+pgdown", "f12":
+	case "ctrl+right", "ctrl+pgdown", "alt+right", "f12":
 		return m, m.changeTab(m.focus, 1)
-	case "ctrl+shift+tab", "ctrl+pgup", "f11":
+	case "ctrl+left", "shift+tab", "ctrl+pgup", "alt+left", "f11":
 		return m, m.changeTab(m.focus, -1)
 	case "up":
 		pane.cursor--
@@ -423,7 +449,12 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("Use F5 inside the Recycle Bin to restore items", true)
 			break
 		}
-		if len(pane.chosen()) > 0 {
+		chosen := pane.chosen()
+		if len(chosen) > 0 {
+			if len(chosen) == 1 {
+				m.startTransferNamePrompt(false, chosen[0])
+				break
+			}
 			if pane.location.Backend.ID() == m.otherPane().location.Backend.ID() && pane.location.Path == m.otherPane().location.Path {
 				m.setStatus("Source and destination directories are the same", true)
 				break
@@ -435,7 +466,12 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("Items cannot be moved into or out of the Recycle Bin; use F5 there to restore", true)
 			break
 		}
-		if len(pane.chosen()) > 0 {
+		chosen := pane.chosen()
+		if len(chosen) > 0 {
+			if len(chosen) == 1 {
+				m.startTransferNamePrompt(true, chosen[0])
+				break
+			}
 			if pane.location.Backend.ID() == m.otherPane().location.Backend.ID() && pane.location.Path == m.otherPane().location.Path {
 				m.setStatus("Source and destination directories are the same", true)
 				break
@@ -494,6 +530,7 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("Hidden files hidden", false)
 		}
+		m.persistSessionState()
 	case "ctrl+b":
 		if pane.location.Backend.ID() == "trash" {
 			m.setStatus("The Recycle Bin cannot be bookmarked", true)
@@ -516,13 +553,12 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.uploadRemote(dirty)
 		}
 	case "alt+m":
-		left, leftOK := m.panes[0].current()
-		right, rightOK := m.panes[1].current()
-		if !leftOK || !rightOK || m.panes[0].location.Backend.ID() != "local" || m.panes[1].location.Backend.ID() != "local" {
-			m.setStatus("Merger requires one local entry in each pane", true)
+		leftPath, rightPath, ok := m.mergerPaths()
+		if !ok {
+			m.setStatus("Merger requires two selected local entries in the active pane, or one chosen local entry in each pane", true)
 			break
 		}
-		return m, tea.ExecProcess(exec.Command("merger", left.Path, right.Path), func(err error) tea.Msg { return appClosedMsg{err: err} })
+		return m, tea.ExecProcess(exec.Command("merger", leftPath, rightPath), func(err error) tea.Msg { return appClosedMsg{err: err} })
 	case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
 		keyName := key.String()
 		tabIndex := int(keyName[len(keyName)-1] - '1')
@@ -545,6 +581,24 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) mergerPaths() (string, string, bool) {
+	active := m.currentPane()
+	if active.location.Backend.ID() == "local" {
+		selected := active.selectedEntries()
+		if len(selected) == 2 {
+			return selected[0].Path, selected[1].Path, true
+		}
+	}
+	if m.panes[0].location.Backend.ID() != "local" || m.panes[1].location.Backend.ID() != "local" {
+		return "", "", false
+	}
+	left, right := m.panes[0].chosen(), m.panes[1].chosen()
+	if len(left) != 1 || len(right) != 1 {
+		return "", "", false
+	}
+	return left[0].Path, right[0].Path, true
 }
 
 func (m *Model) disconnectNetwork() tea.Cmd {
@@ -636,9 +690,9 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modalConfirm:
 		switch key.String() {
 		case "y", "enter":
-			action := m.confirm.action
+			confirmation := m.confirm
 			m.modal, m.confirm = modalNone, confirmState{}
-			return m, m.runConfirmed(action)
+			return m, m.runConfirmed(confirmation)
 		case "n", "esc":
 			if m.confirm.action == confirmTrustCertificate {
 				m.pendingTrust = certificateTrustState{}
@@ -688,6 +742,10 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "v":
 			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
 				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
+				if config.IsLocalLocation(bookmark.Location) {
+					m.setStatus("Local bookmarks do not need gopass credentials", false)
+					break
+				}
 				m.startPrompt("gopass credential ID or unique title (empty = unlink)", bookmark.CredentialRef, promptBookmarkCredential, false)
 				m.prompt.pendingRaw = bookmark.Name
 			}
@@ -702,6 +760,11 @@ func (m *Model) handleModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.bookmarks.cursor >= 0 && m.bookmarks.cursor < len(m.config.Bookmarks) {
 				bookmark := m.config.Bookmarks[m.bookmarks.cursor]
+				if config.IsLocalLocation(bookmark.Location) {
+					m.modal = modalNone
+					m.busy, m.busyLabel = true, "Opening location"
+					return m, tea.Batch(connectCmd(m.focus, bookmark.Location, "", false), busyTickCmd())
+				}
 				if bookmark.CredentialRef != "" {
 					request := credentialRequest{
 						index: m.focus, bookmarkName: bookmark.Name,
@@ -783,8 +846,9 @@ func (m *Model) sortBookmarks() {
 
 func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	prompt := &m.prompt
+	keyName := promptControlKey(key.String())
 	if prompt.checkboxVisible {
-		switch key.String() {
+		switch keyName {
 		case "tab", "shift+tab":
 			prompt.checkboxFocus = !prompt.checkboxFocus
 			return m, nil
@@ -794,11 +858,14 @@ func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if prompt.checkboxFocus && key.String() != "enter" && key.String() != "esc" {
+		if prompt.checkboxFocus && keyName != "enter" && keyName != "esc" {
 			return m, nil
 		}
 	}
-	switch key.String() {
+	if editPromptText(prompt, keyName) {
+		return m, nil
+	}
+	switch keyName {
 	case "esc":
 		if prompt.action == promptBookmarkDisplayName || prompt.action == promptBookmarkGroup ||
 			prompt.action == promptBookmarkCredential || prompt.action == promptCredentialPassword {
@@ -809,23 +876,6 @@ func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.modal, m.prompt = modalNone, promptState{}
-	case "left":
-		prompt.cursor = max(0, prompt.cursor-1)
-	case "right":
-		prompt.cursor = min(len(prompt.value), prompt.cursor+1)
-	case "home", "ctrl+a":
-		prompt.cursor = 0
-	case "end", "ctrl+e":
-		prompt.cursor = len(prompt.value)
-	case "backspace":
-		if prompt.cursor > 0 {
-			prompt.value = append(prompt.value[:prompt.cursor-1], prompt.value[prompt.cursor:]...)
-			prompt.cursor--
-		}
-	case "delete":
-		if prompt.cursor < len(prompt.value) {
-			prompt.value = append(prompt.value[:prompt.cursor], prompt.value[prompt.cursor+1:]...)
-		}
 	case "enter":
 		value, action, pending, checked := string(prompt.value), prompt.action, prompt.pendingRaw, prompt.checkboxChecked
 		m.modal, m.prompt = modalNone, promptState{}
@@ -840,6 +890,115 @@ func (m *Model) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func promptControlKey(key string) string {
+	switch key {
+	case "ctrl+h", "ctrl+w":
+		// Most terminals encode Ctrl+Backspace as one of these control keys.
+		return "ctrl+backspace"
+	default:
+		return key
+	}
+}
+
+func promptUnknownControlKey(message tea.Msg) string {
+	// Bubble Tea v1 exposes unrecognised modified-key CSI sequences only through
+	// a private fmt.Stringer message. Cover the common xterm and Kitty encodings
+	// until the dependency provides public Ctrl+Backspace/Ctrl+Delete key types.
+	stringer, ok := message.(fmt.Stringer)
+	if !ok {
+		return ""
+	}
+	switch stringer.String() {
+	case "?CSI[51 59 53 126]?", // CSI 3;5~ (xterm Ctrl+Delete)
+		"?CSI[53 55 51 52 57 59 53 117]?": // CSI 57349;5u (Kitty Ctrl+Delete)
+		return "ctrl+delete"
+	case "?CSI[49 50 55 59 53 117]?", // CSI 127;5u (Kitty Ctrl+Backspace)
+		"?CSI[53 55 51 52 55 59 53 117]?",    // CSI 57347;5u (Kitty Ctrl+Backspace)
+		"?CSI[50 55 59 53 59 49 50 55 126]?": // CSI 27;5;127~ (modifyOtherKeys)
+		return "ctrl+backspace"
+	case "?CSI[53 55 51 53 48 59 53 117]?": // CSI 57350;5u (Kitty Ctrl+Left)
+		return "ctrl+left"
+	case "?CSI[53 55 51 53 49 59 53 117]?": // CSI 57351;5u (Kitty Ctrl+Right)
+		return "ctrl+right"
+	default:
+		return ""
+	}
+}
+
+func editPromptText(prompt *promptState, key string) bool {
+	prompt.cursor = max(0, min(prompt.cursor, len(prompt.value)))
+	switch key {
+	case "left":
+		prompt.cursor = max(0, prompt.cursor-1)
+	case "right":
+		prompt.cursor = min(len(prompt.value), prompt.cursor+1)
+	case "ctrl+left":
+		prompt.cursor = previousPromptWord(prompt.value, prompt.cursor)
+	case "ctrl+right":
+		prompt.cursor = nextPromptWord(prompt.value, prompt.cursor)
+	case "home", "ctrl+a":
+		prompt.cursor = 0
+	case "end", "ctrl+e":
+		prompt.cursor = len(prompt.value)
+	case "backspace":
+		if prompt.cursor > 0 {
+			prompt.value = append(prompt.value[:prompt.cursor-1], prompt.value[prompt.cursor:]...)
+			prompt.cursor--
+		}
+	case "delete":
+		if prompt.cursor < len(prompt.value) {
+			prompt.value = append(prompt.value[:prompt.cursor], prompt.value[prompt.cursor+1:]...)
+		}
+	case "ctrl+backspace":
+		start := previousPromptWord(prompt.value, prompt.cursor)
+		prompt.value = append(prompt.value[:start], prompt.value[prompt.cursor:]...)
+		prompt.cursor = start
+	case "ctrl+delete":
+		end := nextPromptWordEnd(prompt.value, prompt.cursor)
+		prompt.value = append(prompt.value[:prompt.cursor], prompt.value[end:]...)
+	default:
+		return false
+	}
+	return true
+}
+
+func previousPromptWord(value []rune, cursor int) int {
+	cursor = max(0, min(cursor, len(value)))
+	for cursor > 0 && !isPromptWordRune(value[cursor-1]) {
+		cursor--
+	}
+	for cursor > 0 && isPromptWordRune(value[cursor-1]) {
+		cursor--
+	}
+	return cursor
+}
+
+func nextPromptWord(value []rune, cursor int) int {
+	cursor = max(0, min(cursor, len(value)))
+	for cursor < len(value) && isPromptWordRune(value[cursor]) {
+		cursor++
+	}
+	for cursor < len(value) && !isPromptWordRune(value[cursor]) {
+		cursor++
+	}
+	return cursor
+}
+
+func nextPromptWordEnd(value []rune, cursor int) int {
+	cursor = max(0, min(cursor, len(value)))
+	for cursor < len(value) && !isPromptWordRune(value[cursor]) {
+		cursor++
+	}
+	for cursor < len(value) && isPromptWordRune(value[cursor]) {
+		cursor++
+	}
+	return cursor
+}
+
+func isPromptWordRune(character rune) bool {
+	return character == '_' || unicode.IsLetter(character) || unicode.IsNumber(character) || unicode.IsMark(character)
 }
 
 func (m *Model) submitPrompt(action promptAction, value, pending string, optionChecked bool) tea.Cmd {
@@ -859,6 +1018,36 @@ func (m *Model) submitPrompt(action promptAction, value, pending string, optionC
 		}
 		backend, newPath := pane.location.Backend, pane.location.Backend.Join(pane.location.Path, value)
 		return m.simpleOperation("Rename", func(ctx context.Context) error { return backend.Rename(ctx, entry.Path, newPath) })
+	case promptCopyAs, promptMoveAs:
+		entries := pane.chosen()
+		if len(entries) != 1 {
+			m.setStatus("Choose exactly one entry to give it a destination name", true)
+			return nil
+		}
+		move := action == promptMoveAs
+		if !validTransferName(m.otherPane().location.Backend, value) {
+			m.setStatus("Destination name must be a single file or directory name", true)
+			m.startTransferNamePrompt(move, entries[0])
+			m.prompt.value, m.prompt.cursor = []rune(value), len([]rune(value))
+			return nil
+		}
+		destination := m.otherPane()
+		destinationPath := destination.location.Backend.Join(destination.location.Path, value)
+		if pane.location.Backend.ID() == destination.location.Backend.ID() &&
+			destination.location.Backend.Clean(entries[0].Path) == destination.location.Backend.Clean(destinationPath) {
+			m.setStatus("Source and destination are the same; enter a different name", true)
+			m.startTransferNamePrompt(move, entries[0])
+			return nil
+		}
+		verb, confirmAction := "Copy", confirmCopy
+		if move {
+			verb, confirmAction = "Move", confirmMove
+		}
+		m.modal = modalConfirm
+		m.confirm = confirmState{
+			title:  verb + " " + entries[0].Name + " to the other pane as " + value + "?" + m.overwriteWarningFor([]string{value}),
+			action: confirmAction, destinationName: value,
+		}
 	case promptLocation:
 		if value == "" {
 			return nil
@@ -1000,13 +1189,23 @@ func (m *Model) submitPrompt(action promptAction, value, pending string, optionC
 	return nil
 }
 
-func (m *Model) runConfirmed(action confirmAction) tea.Cmd {
+func validTransferName(backend vfs.Backend, name string) bool {
+	return name != "" && name != "." && name != ".." && backend.Base(name) == name
+}
+
+func (m *Model) runConfirmed(confirmation confirmState) tea.Cmd {
 	source, destination := m.currentPane(), m.otherPane()
 	entries := append([]vfs.Entry(nil), source.chosen()...)
-	switch action {
+	switch confirmation.action {
 	case confirmCopy:
+		if confirmation.destinationName != "" && len(entries) == 1 {
+			return m.transferOperationAs("Copy", false, source.location.Backend, destination.location.Backend, destination.location.Path, confirmation.destinationName, entries[0])
+		}
 		return m.transferOperation("Copy", false, source.location.Backend, destination.location.Backend, destination.location.Path, entries)
 	case confirmMove:
+		if confirmation.destinationName != "" && len(entries) == 1 {
+			return m.transferOperationAs("Move", true, source.location.Backend, destination.location.Backend, destination.location.Path, confirmation.destinationName, entries[0])
+		}
 		return m.transferOperation("Move", true, source.location.Backend, destination.location.Backend, destination.location.Path, entries)
 	case confirmTrash:
 		bin, err := trash.New()
@@ -1075,6 +1274,14 @@ func (m *Model) simpleOperation(description string, operation func(context.Conte
 }
 
 func (m *Model) transferOperation(description string, move bool, source, destination vfs.Backend, destinationPath string, entries []vfs.Entry) tea.Cmd {
+	return m.transferOperationWithName(description, move, source, destination, destinationPath, "", entries)
+}
+
+func (m *Model) transferOperationAs(description string, move bool, source, destination vfs.Backend, destinationPath, destinationName string, entry vfs.Entry) tea.Cmd {
+	return m.transferOperationWithName(description, move, source, destination, destinationPath, destinationName, []vfs.Entry{entry})
+}
+
+func (m *Model) transferOperationWithName(description string, move bool, source, destination vfs.Backend, destinationPath, destinationName string, entries []vfs.Entry) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	tick := m.startBusy(description, cancel)
 	progressChannel := m.progressCh
@@ -1087,7 +1294,11 @@ func (m *Model) transferOperation(description string, move bool, source, destina
 				}
 			}
 			var err error
-			if move {
+			if move && destinationName != "" {
+				err = vfs.MoveAs(ctx, source, entry, destination, destinationPath, destinationName, progress)
+			} else if destinationName != "" {
+				err = vfs.CopyAs(ctx, source, entry, destination, destinationPath, destinationName, progress)
+			} else if move {
 				err = vfs.Move(ctx, source, entry, destination, destinationPath, progress)
 			} else {
 				err = vfs.Copy(ctx, source, entry, destination, destinationPath, progress)

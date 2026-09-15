@@ -190,11 +190,7 @@ func (m *Model) renderTabs(index, width int) string {
 	var labels []string
 	used := 1
 	for tabIndex, tab := range m.tabs[index] {
-		name := tab.location.Backend.Base(tab.location.Path)
-		if name == "." || name == "/" || name == "" {
-			name = tab.location.Backend.Label()
-		}
-		label := fmt.Sprintf(" %d:%s ", tabIndex+1, truncateEnd(name, 14))
+		label := paneTabLabel(tabIndex, tab)
 		if used+lipgloss.Width(label) > width {
 			labels = append(labels, mutedStyle.Render(" … "))
 			break
@@ -207,6 +203,29 @@ func (m *Model) renderTabs(index, width int) string {
 		used += lipgloss.Width(label)
 	}
 	return baseStyle.Width(width).Render(" " + strings.Join(labels, ""))
+}
+
+func paneTabLabel(index int, tab *pane) string {
+	name := tab.location.Backend.Base(tab.location.Path)
+	if name == "." || name == "/" || name == "" {
+		name = tab.location.Backend.Label()
+	}
+	return fmt.Sprintf(" %d:%s ", index+1, truncateEnd(name, 14))
+}
+
+func (m *Model) tabAt(paneIndex, paneWidth, x int) int {
+	used := 1
+	for tabIndex, tab := range m.tabs[paneIndex] {
+		labelWidth := lipgloss.Width(paneTabLabel(tabIndex, tab))
+		if used+labelWidth > paneWidth {
+			return -1
+		}
+		if x >= used && x < used+labelWidth {
+			return tabIndex
+		}
+		used += labelWidth
+	}
+	return -1
 }
 
 func (m *Model) renderFooter(width int) string {
@@ -342,14 +361,15 @@ var helpBindings = []helpBinding{
 	{"F2", "Rename the highlighted entry"},
 	{"F3 / Ctrl+F", "Open the fuzzy finder"},
 	{"F4 / Ctrl+O", "Choose file application"},
-	{"F5", "Copy or restore from Trash"},
-	{"F6", "Move selection to other pane"},
+	{"F5", "Copy; name one chosen entry"},
+	{"F6", "Move; name one chosen entry"},
 	{"F7", "Create a directory"},
 	{"F8 / Delete", "Trash local / delete remote"},
 	{"F9", "Toggle integrated terminal"},
 	{"F10 / Ctrl+C", "Quit tui-commander"},
-	{"F11 / Ctrl+Shift+Tab / Ctrl+PgUp", "Activate the previous tab"},
-	{"F12 / Ctrl+Tab / Ctrl+PgDown", "Activate the next tab"},
+	{"F11 / Shift+Tab / Ctrl+Left / Ctrl+PgUp", "Activate the previous tab"},
+	{"F12 / Ctrl+Right / Ctrl+PgDown", "Activate the next tab"},
+	{"Click a tab", "Activate the clicked tab"},
 	{"Tab", "Switch the active pane"},
 	{"Ctrl+T", "Create tab in active pane"},
 	{"Ctrl+W", "Close active tab"},
@@ -380,7 +400,7 @@ var helpBindings = []helpBinding{
 	{"Ctrl+R", "Refresh pane and Git status"},
 	{"Alt+F5", "Create archive from selection"},
 	{"Alt+F6", "Extract highlighted archive"},
-	{"Alt+M", "Open pane entries in merger"},
+	{"Alt+M", "Merge two chosen entries"},
 	{"Alt+R", "Open or close Recycle Bin"},
 	{"Alt+U", "Upload a changed remote file"},
 	{"Up / k (menu)", "Select the previous menu item"},
@@ -397,10 +417,12 @@ var helpBindings = []helpBinding{
 	{"Esc / c (Connections)", "Close connection bookmarks"},
 	{"Left (prompt)", "Move the text cursor left"},
 	{"Right (prompt)", "Move the text cursor right"},
+	{"Ctrl+Left / Ctrl+Right (prompt)", "Move text cursor by one word"},
 	{"Home / Ctrl+A (prompt)", "Move text cursor to start"},
 	{"End / Ctrl+E (prompt)", "Move text cursor to end"},
 	{"Backspace (prompt)", "Delete the previous character"},
 	{"Delete (prompt)", "Delete the next character"},
+	{"Ctrl+Backspace / Ctrl+Delete (prompt)", "Delete one word"},
 	{"Enter (prompt)", "Submit the prompt"},
 	{"Esc (prompt)", "Cancel the prompt"},
 	{"Tab (option prompt)", "Focus the prompt checkbox"},

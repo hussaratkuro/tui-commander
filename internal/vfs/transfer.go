@@ -17,12 +17,37 @@ type TransferProgress struct {
 type ProgressFunc func(TransferProgress)
 
 func Copy(ctx context.Context, source Backend, sourceEntry Entry, destination Backend, destinationDir string, progress ProgressFunc) error {
+	return CopyAs(ctx, source, sourceEntry, destination, destinationDir, sourceEntry.Name, progress)
+}
+
+// CopyAs copies sourceEntry into destinationDir using destinationName for the
+// top-level entry. Children of a renamed directory keep their original names.
+func CopyAs(ctx context.Context, source Backend, sourceEntry Entry, destination Backend, destinationDir, destinationName string, progress ProgressFunc) error {
+	destinationPath, err := namedDestination(destination, destinationDir, destinationName)
+	if err != nil {
+		return err
+	}
+	if source.ID() == destination.ID() && destination.Clean(sourceEntry.Path) == destination.Clean(destinationPath) {
+		return fmt.Errorf("source and destination are the same: %s", sourceEntry.Path)
+	}
 	state := TransferProgress{Name: sourceEntry.Name, Total: treeSize(ctx, source, sourceEntry)}
-	return copyEntry(ctx, source, sourceEntry, destination, destinationDir, &state, progress)
+	return copyEntryTo(ctx, source, sourceEntry, destination, destinationPath, &state, progress)
 }
 
 func Move(ctx context.Context, source Backend, sourceEntry Entry, destination Backend, destinationDir string, progress ProgressFunc) error {
-	destinationPath := destination.Join(destinationDir, sourceEntry.Name)
+	return MoveAs(ctx, source, sourceEntry, destination, destinationDir, sourceEntry.Name, progress)
+}
+
+// MoveAs moves sourceEntry into destinationDir using destinationName for the
+// top-level entry. It works both as a same-backend rename and across backends.
+func MoveAs(ctx context.Context, source Backend, sourceEntry Entry, destination Backend, destinationDir, destinationName string, progress ProgressFunc) error {
+	destinationPath, err := namedDestination(destination, destinationDir, destinationName)
+	if err != nil {
+		return err
+	}
+	if source.ID() == destination.ID() && destination.Clean(sourceEntry.Path) == destination.Clean(destinationPath) {
+		return fmt.Errorf("source and destination are the same: %s", sourceEntry.Path)
+	}
 	if source.ID() == destination.ID() {
 		if err := source.Rename(ctx, sourceEntry.Path, destinationPath); err == nil {
 			return nil
@@ -30,19 +55,25 @@ func Move(ctx context.Context, source Backend, sourceEntry Entry, destination Ba
 		// Local moves can cross filesystem boundaries, where rename is not
 		// available. Fall through to copy-and-delete in that case.
 	}
-	if err := Copy(ctx, source, sourceEntry, destination, destinationDir, progress); err != nil {
+	if err := CopyAs(ctx, source, sourceEntry, destination, destinationDir, destinationName, progress); err != nil {
 		return err
 	}
 	return source.Remove(ctx, sourceEntry.Path, sourceEntry.Dir)
 }
 
-func copyEntry(ctx context.Context, source Backend, entry Entry, destination Backend, destinationDir string, state *TransferProgress, progress ProgressFunc) error {
+func namedDestination(destination Backend, destinationDir, destinationName string) (string, error) {
+	if destinationName == "" || destinationName == "." || destinationName == ".." || destination.Base(destinationName) != destinationName {
+		return "", fmt.Errorf("invalid destination name %q", destinationName)
+	}
+	return destination.Join(destinationDir, destinationName), nil
+}
+
+func copyEntryTo(ctx context.Context, source Backend, entry Entry, destination Backend, destinationPath string, state *TransferProgress, progress ProgressFunc) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	destinationPath := destination.Join(destinationDir, entry.Name)
 	state.Name = entry.Name
 	if entry.Dir {
 		if err := destination.Mkdir(ctx, destinationPath, entry.Mode); err != nil {
@@ -53,7 +84,8 @@ func copyEntry(ctx context.Context, source Backend, entry Entry, destination Bac
 			return fmt.Errorf("list %s: %w", entry.Path, err)
 		}
 		for _, child := range children {
-			if err := copyEntry(ctx, source, child, destination, destinationPath, state, progress); err != nil {
+			childDestination := destination.Join(destinationPath, child.Name)
+			if err := copyEntryTo(ctx, source, child, destination, childDestination, state, progress); err != nil {
 				return err
 			}
 		}

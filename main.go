@@ -27,8 +27,14 @@ func main() {
 		os.Exit(1)
 	}
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "tui-commander:", err)
+	_, runErr := program.Run()
+	closeErr := model.Close()
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "tui-commander:", runErr)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintln(os.Stderr, "tui-commander: save session or close resources:", closeErr)
 		os.Exit(1)
 	}
 }

@@ -19,8 +19,25 @@ type Bookmark struct {
 	CredentialRef string `json:"credential_ref,omitempty"`
 }
 
+type SessionTab struct {
+	Location    string `json:"location"`
+	LocalReturn string `json:"local_return,omitempty"`
+	ShowHidden  bool   `json:"show_hidden,omitempty"`
+}
+
+type SessionPane struct {
+	Tabs      []SessionTab `json:"tabs"`
+	ActiveTab int          `json:"active_tab,omitempty"`
+}
+
+type Session struct {
+	Panes [2]SessionPane `json:"panes"`
+	Focus int            `json:"focus,omitempty"`
+}
+
 type Config struct {
 	Bookmarks []Bookmark `json:"bookmarks,omitempty"`
+	Session   *Session   `json:"session,omitempty"`
 }
 
 func Path() (string, error) {
@@ -222,12 +239,45 @@ func (c *Config) normalize() {
 			bookmark.Password = ""
 		}
 		bookmark.Location = SanitizeLocation(bookmark.Location)
+		if IsLocalLocation(bookmark.Location) {
+			bookmark.Password = ""
+			bookmark.CredentialRef = ""
+		}
 		if bookmark.Name != "" && bookmark.Location != "" {
 			clean = append(clean, bookmark)
 		}
 	}
 	c.Bookmarks = clean
 	c.groupBookmarks()
+	c.normalizeSession()
+}
+
+func (c *Config) normalizeSession() {
+	if c.Session == nil {
+		return
+	}
+	c.Session.Focus = max(0, min(1, c.Session.Focus))
+	valid := true
+	for paneIndex := range c.Session.Panes {
+		pane := &c.Session.Panes[paneIndex]
+		tabs := pane.Tabs[:0]
+		for _, tab := range pane.Tabs {
+			tab.Location = SanitizeLocation(strings.TrimSpace(tab.Location))
+			tab.LocalReturn = strings.TrimSpace(tab.LocalReturn)
+			if tab.Location != "" {
+				tabs = append(tabs, tab)
+			}
+		}
+		pane.Tabs = tabs
+		if len(pane.Tabs) == 0 {
+			valid = false
+			continue
+		}
+		pane.ActiveTab = max(0, min(len(pane.Tabs)-1, pane.ActiveTab))
+	}
+	if !valid {
+		c.Session = nil
+	}
 }
 
 func (c *Config) groupBookmarks() {
@@ -255,6 +305,11 @@ func bookmarkProtocol(location string) string {
 		return "local"
 	}
 	return strings.ToLower(parsed.Scheme)
+}
+
+func IsLocalLocation(location string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(location))
+	return err == nil && (parsed.Scheme == "" || strings.EqualFold(parsed.Scheme, "file"))
 }
 
 func SanitizeLocation(location string) string {

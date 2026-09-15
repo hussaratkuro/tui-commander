@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -55,6 +56,8 @@ const (
 	promptNone promptAction = iota
 	promptMkdir
 	promptRename
+	promptCopyAs
+	promptMoveAs
 	promptLocation
 	promptPassword
 	promptPack
@@ -94,8 +97,9 @@ const (
 )
 
 type confirmState struct {
-	title  string
-	action confirmAction
+	title           string
+	action          confirmAction
+	destinationName string
 }
 
 type applicationState struct {
@@ -170,33 +174,49 @@ type Model struct {
 	lastClickAt       time.Time
 	commands          commandPaletteState
 	sync              syncCenterState
+	persistSession    bool
+	closed            bool
+	closeErr          error
 }
 
 func New(options Options) (*Model, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	left, err := vfs.Connect(ctx, options.Left, "")
-	if err != nil {
-		return nil, fmt.Errorf("open left location: %w", err)
-	}
-	right, err := vfs.Connect(ctx, options.Right, "")
-	if err != nil {
-		left.Backend.Close()
-		return nil, fmt.Errorf("open right location: %w", err)
-	}
 	cfg, err := config.Load()
 	if err != nil {
-		left.Backend.Close()
-		right.Backend.Close()
 		return nil, fmt.Errorf("load configuration: %w", err)
+	}
+	model := &Model{config: cfg, status: "Ready"}
+	restored := false
+	if options.restoreSession && cfg.Session != nil {
+		restored = model.restoreSession(*cfg.Session, [2]string{options.Left, options.Right})
+	}
+	if !restored {
+		model.status = "Ready"
+		if err := model.openInitialPanes(options.Left, options.Right); err != nil {
+			model.closeBackends()
+			return nil, err
+		}
 	}
 	tempRoot, err := os.MkdirTemp("", "tui-commander-")
 	if err != nil {
-		left.Backend.Close()
-		right.Backend.Close()
+		model.closeBackends()
 		return nil, err
 	}
-	model := &Model{config: cfg, tempRoot: tempRoot, status: "Ready", backends: []vfs.Backend{left.Backend, right.Backend}}
+	model.tempRoot = tempRoot
+	model.persistSession = options.saveSession
+	return model, nil
+}
+
+func (m *Model) openInitialPanes(leftRaw, rightRaw string) error {
+	left, err := connectInitialLocation(leftRaw, "")
+	if err != nil {
+		return fmt.Errorf("open left location: %w", err)
+	}
+	right, err := connectInitialLocation(rightRaw, "")
+	if err != nil {
+		_ = left.Backend.Close()
+		return fmt.Errorf("open right location: %w", err)
+	}
+	m.backends = append(m.backends, left.Backend, right.Backend)
 	fallback, _ := os.Getwd()
 	leftReturn, rightReturn := fallback, fallback
 	if left.Backend.ID() == "local" {
@@ -205,28 +225,172 @@ func New(options Options) (*Model, error) {
 	if right.Backend.ID() == "local" {
 		rightReturn = right.Path
 	}
-	model.panes[0] = &pane{location: left, selected: make(map[string]bool), localReturn: leftReturn, loading: true}
-	model.panes[1] = &pane{location: right, selected: make(map[string]bool), localReturn: rightReturn, loading: true}
-	model.tabs[0] = []*pane{model.panes[0]}
-	model.tabs[1] = []*pane{model.panes[1]}
-	return model, nil
+	m.panes[0] = &pane{location: left, selected: make(map[string]bool), localReturn: leftReturn, loading: true}
+	m.panes[1] = &pane{location: right, selected: make(map[string]bool), localReturn: rightReturn, loading: true}
+	m.tabs[0] = []*pane{m.panes[0]}
+	m.tabs[1] = []*pane{m.panes[1]}
+	return nil
+}
+
+func connectInitialLocation(raw, password string) (vfs.Location, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return vfs.Connect(ctx, raw, password)
+}
+
+func (m *Model) restoreSession(session config.Session, fallbackLocations [2]string) bool {
+	fallback, _ := os.Getwd()
+	skipped := 0
+	for paneIndex, savedPane := range session.Panes {
+		restoredActive := 0
+		for savedIndex, savedTab := range savedPane.Tabs {
+			password := sessionPassword(m.config, savedTab.Location)
+			location, err := connectInitialLocation(savedTab.Location, password)
+			if err != nil {
+				skipped++
+				continue
+			}
+			localReturn := savedTab.LocalReturn
+			if localReturn == "" {
+				localReturn = fallback
+			}
+			if location.Backend.ID() == "local" {
+				localReturn = location.Path
+			}
+			restored := &pane{
+				location: location, selected: make(map[string]bool), showHidden: savedTab.ShowHidden,
+				password: password, passwordSaved: password != "", localReturn: localReturn, loading: true,
+			}
+			m.tabs[paneIndex] = append(m.tabs[paneIndex], restored)
+			m.backends = append(m.backends, location.Backend)
+			if savedIndex <= savedPane.ActiveTab {
+				restoredActive = len(m.tabs[paneIndex]) - 1
+			}
+		}
+		if len(m.tabs[paneIndex]) == 0 {
+			location, err := connectInitialLocation(fallbackLocations[paneIndex], "")
+			if err != nil {
+				m.closeBackends()
+				m.tabs, m.panes, m.activeTab = [2][]*pane{}, [2]*pane{}, [2]int{}
+				return false
+			}
+			localReturn := fallback
+			if location.Backend.ID() == "local" {
+				localReturn = location.Path
+			}
+			m.tabs[paneIndex] = []*pane{{
+				location: location, selected: make(map[string]bool), localReturn: localReturn, loading: true,
+			}}
+			m.backends = append(m.backends, location.Backend)
+			restoredActive = 0
+		}
+		m.activeTab[paneIndex] = restoredActive
+		m.panes[paneIndex] = m.tabs[paneIndex][m.activeTab[paneIndex]]
+	}
+	m.focus = session.Focus
+	if skipped == 1 {
+		m.setStatus("Restored session; one unavailable tab was skipped", true)
+	} else if skipped > 1 {
+		m.setStatus(fmt.Sprintf("Restored session; %d unavailable tabs were skipped", skipped), true)
+	} else {
+		m.setStatus("Previous session restored", false)
+	}
+	return true
 }
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.loadPaneCmd(0), m.loadPaneCmd(1), watchTickCmd(), theme.Watch())
 }
 
-func (m *Model) close() {
+func (m *Model) Close() error { return m.shutdown() }
+
+func (m *Model) close() { _ = m.shutdown() }
+
+func (m *Model) shutdown() error {
+	if m.closed {
+		return m.closeErr
+	}
+	m.closed = true
 	if m.cancel != nil {
 		m.cancel()
+	}
+	var sessionErr error
+	if m.persistSession {
+		sessionErr = m.saveSession()
 	}
 	if m.terminal != nil {
 		m.terminal.close()
 	}
+	backendErr := m.closeBackends()
+	tempErr := os.RemoveAll(m.tempRoot)
+	m.closeErr = errors.Join(sessionErr, backendErr, tempErr)
+	return m.closeErr
+}
+
+func (m *Model) closeBackends() error {
+	var result error
 	for _, backend := range m.backends {
-		backend.Close()
+		result = errors.Join(result, backend.Close())
 	}
-	os.RemoveAll(m.tempRoot)
+	m.backends = nil
+	return result
+}
+
+func (m *Model) saveSession() error {
+	session := &config.Session{Focus: m.focus}
+	for paneIndex := range m.tabs {
+		session.Panes[paneIndex].ActiveTab = m.activeTab[paneIndex]
+		for _, tab := range m.tabs[paneIndex] {
+			location := currentLocationString(*tab)
+			if tab.location.Backend.ID() == "trash" {
+				location = tab.localReturn
+			}
+			session.Panes[paneIndex].Tabs = append(session.Panes[paneIndex].Tabs, config.SessionTab{
+				Location: config.SanitizeLocation(location), LocalReturn: tab.localReturn, ShowHidden: tab.showHidden,
+			})
+		}
+	}
+	m.config.Session = session
+	return m.config.Save()
+}
+
+func (m *Model) persistSessionState() {
+	if !m.persistSession || m.closed {
+		return
+	}
+	if err := m.saveSession(); err != nil {
+		m.setStatus("Save session: "+err.Error(), true)
+	}
+}
+
+func sessionPassword(cfg config.Config, location string) string {
+	identity := sessionConnectionIdentity(location)
+	if identity == "" {
+		return ""
+	}
+	for _, bookmark := range cfg.Bookmarks {
+		if bookmark.Password != "" && sessionConnectionIdentity(bookmark.Location) == identity {
+			return bookmark.Password
+		}
+	}
+	return ""
+}
+
+func sessionConnectionIdentity(location string) string {
+	parsed, err := url.Parse(vfs.NormalizeLocation(config.SanitizeLocation(location)))
+	if err != nil || parsed.Scheme == "" || parsed.Scheme == "file" {
+		return ""
+	}
+	username := ""
+	if parsed.User != nil {
+		username = parsed.User.Username()
+	}
+	identity := strings.ToLower(parsed.Scheme) + "://" + username + "@" + strings.ToLower(parsed.Host)
+	if strings.EqualFold(parsed.Scheme, "smb") {
+		share := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")[0]
+		identity += "/" + share + "?domain=" + strings.ToLower(parsed.Query().Get("domain"))
+	}
+	return identity
 }
 
 type paneLoadedMsg struct {
@@ -285,6 +449,9 @@ type credentialResolvedMsg struct {
 }
 
 func (m *Model) loadPaneCmd(index int) tea.Cmd {
+	// Persist before starting the asynchronous load. This also survives the
+	// terminal window being closed before Bubble Tea can shut down cleanly.
+	m.persistSessionState()
 	target := m.panes[index]
 	location := target.location
 	return func() tea.Msg {
@@ -350,11 +517,13 @@ func (m *Model) closeTab(index int) tea.Cmd {
 func (m *Model) changeTab(index, delta int) tea.Cmd {
 	count := len(m.tabs[index])
 	if count <= 1 {
+		m.setStatus("This pane has only one tab", false)
 		return nil
 	}
 	m.activeTab[index] = (m.activeTab[index] + delta + count) % count
 	m.panes[index] = m.tabs[index][m.activeTab[index]]
 	m.panes[index].loading = true
+	m.setStatus(fmt.Sprintf("Activated tab %d of %d", m.activeTab[index]+1, count), false)
 	return m.loadPaneCmd(index)
 }
 
@@ -368,6 +537,7 @@ func (m *Model) activateTab(index, tabIndex int) tea.Cmd {
 	m.activeTab[index] = tabIndex
 	m.panes[index] = m.tabs[index][tabIndex]
 	m.panes[index].loading = true
+	m.setStatus(fmt.Sprintf("Activated tab %d of %d", tabIndex+1, len(m.tabs[index])), false)
 	return m.loadPaneCmd(index)
 }
 
@@ -398,15 +568,20 @@ func (p *pane) visibleEntries() []vfs.Entry {
 }
 
 func (p *pane) chosen() []vfs.Entry {
-	var result []vfs.Entry
 	if len(p.selected) > 0 {
-		for _, entry := range p.entries {
-			if p.selected[entry.Path] {
-				result = append(result, entry)
-			}
-		}
+		return p.selectedEntries()
 	} else if entry, ok := p.current(); ok {
-		result = append(result, entry)
+		return []vfs.Entry{entry}
+	}
+	return nil
+}
+
+func (p *pane) selectedEntries() []vfs.Entry {
+	result := make([]vfs.Entry, 0, len(p.selected))
+	for _, entry := range p.entries {
+		if p.selected[entry.Path] {
+			result = append(result, entry)
+		}
 	}
 	return result
 }
@@ -438,6 +613,14 @@ func (m *Model) setStatus(message string, isError bool) {
 func (m *Model) startPrompt(title, value string, action promptAction, masked bool) {
 	m.modal = modalPrompt
 	m.prompt = promptState{title: title, value: []rune(value), cursor: len([]rune(value)), action: action, masked: masked}
+}
+
+func (m *Model) startTransferNamePrompt(move bool, entry vfs.Entry) {
+	action, verb := promptCopyAs, "Copy"
+	if move {
+		action, verb = promptMoveAs, "Move"
+	}
+	m.startPrompt(verb+" to the other pane as", entry.Name, action, false)
 }
 
 func (m *Model) startPasswordPrompt(raw string) {
@@ -550,13 +733,21 @@ func (m *Model) selectedSummary() string {
 
 func (m *Model) overwriteWarning() string {
 	chosen := m.currentPane().chosen()
+	names := make([]string, len(chosen))
+	for index, entry := range chosen {
+		names[index] = entry.Name
+	}
+	return m.overwriteWarningFor(names)
+}
+
+func (m *Model) overwriteWarningFor(names []string) string {
 	destinationNames := make(map[string]bool, len(m.otherPane().entries))
 	for _, entry := range m.otherPane().entries {
 		destinationNames[entry.Name] = true
 	}
 	count := 0
-	for _, entry := range chosen {
-		if destinationNames[entry.Name] {
+	for _, name := range names {
+		if destinationNames[name] {
 			count++
 		}
 	}

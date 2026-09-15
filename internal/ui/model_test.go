@@ -15,6 +15,10 @@ import (
 	"tui-commander/internal/vfs"
 )
 
+type promptCSIMessage string
+
+func (message promptCSIMessage) String() string { return string(message) }
+
 func TestModelRendersTwoLocalPanes(t *testing.T) {
 	directory := t.TempDir()
 	model, err := New(Options{Left: directory, Right: directory})
@@ -178,6 +182,54 @@ func TestPromptMasksPassword(t *testing.T) {
 	}
 }
 
+func TestPromptWordEditingShortcuts(t *testing.T) {
+	model := &Model{modal: modalPrompt}
+	setPrompt := func(value string, cursor int) {
+		model.prompt = promptState{value: []rune(value), cursor: cursor}
+	}
+
+	value := "report-final 2026.txt"
+	setPrompt(value, len([]rune(value)))
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	if want := len([]rune("report-final 2026.")); model.prompt.cursor != want {
+		t.Fatalf("first Ctrl+Left cursor = %d, want %d", model.prompt.cursor, want)
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	if want := len([]rune("report-final ")); model.prompt.cursor != want {
+		t.Fatalf("second Ctrl+Left cursor = %d, want %d", model.prompt.cursor, want)
+	}
+	setPrompt(value, 0)
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	if want := len([]rune("report-")); model.prompt.cursor != want {
+		t.Fatalf("Ctrl+Right cursor = %d, want %d", model.prompt.cursor, want)
+	}
+
+	value = "report-final.txt"
+	setPrompt(value, len([]rune(value)))
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
+	if got := string(model.prompt.value); got != "report-final." {
+		t.Fatalf("Ctrl+Backspace value = %q, want %q", got, "report-final.")
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	if got := string(model.prompt.value); got != "report-" {
+		t.Fatalf("Ctrl+W fallback value = %q, want %q", got, "report-")
+	}
+
+	setPrompt(value, 0)
+	model.Update(promptCSIMessage("?CSI[51 59 53 126]?"))
+	if got := string(model.prompt.value); got != "-final.txt" {
+		t.Fatalf("Ctrl+Delete value = %q, want %q", got, "-final.txt")
+	}
+
+	value = "árvíz-tűrő.txt"
+	if got, want := nextPromptWord([]rune(value), 0), len([]rune("árvíz-")); got != want {
+		t.Fatalf("Unicode next word cursor = %d, want %d", got, want)
+	}
+	if got, want := previousPromptWord([]rune(value), len([]rune(value))), len([]rune("árvíz-tűrő.")); got != want {
+		t.Fatalf("Unicode previous word cursor = %d, want %d", got, want)
+	}
+}
+
 func TestBookmarkPromptOffersOptInPasswordCheckbox(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
@@ -238,6 +290,31 @@ func TestSavedBookmarkConnectsWithoutPasswordPrompt(t *testing.T) {
 		t.Fatalf("saved-password bookmark state = command %v, modal %v, busy %v", command != nil, model.modal, model.busy)
 	}
 	model.stopBusy()
+}
+
+func TestLocalBookmarkOpensWithoutAnyPasswordPrompt(t *testing.T) {
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.config.Bookmarks = []config.Bookmark{{
+		Name: "Local work", Location: directory, Password: "stale", CredentialRef: "stale-gopass-entry",
+	}}
+	model.modal = modalBookmarks
+
+	_, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || model.modal != modalNone || !model.busy || model.prompt.action != promptNone || model.pendingCredential.ref != "" {
+		t.Fatalf("local bookmark state = command %v, modal %v, busy %v, prompt %v, pending %#v", command != nil, model.modal, model.busy, model.prompt.action, model.pendingCredential)
+	}
+	model.stopBusy()
+
+	model.modal = modalBookmarks
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if model.modal != modalBookmarks || model.prompt.action != promptNone || !strings.Contains(model.status, "do not need gopass") {
+		t.Fatalf("local gopass action = modal %v, prompt %v, status %q", model.modal, model.prompt.action, model.status)
+	}
 }
 
 func TestFriendlyFTPESLocationOffersRemoteDirectoryThenPassword(t *testing.T) {
@@ -394,6 +471,89 @@ func TestPaneTabsPreserveIndependentLocations(t *testing.T) {
 	}
 }
 
+func TestSessionRestoresTabsActiveIndicesFocusAndSinglePaneDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	leftFirst, leftSecond, rightOnly := t.TempDir(), t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: leftFirst, Right: rightOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.persistSession = true
+	model.newTab(0)
+	model.panes[0].location.Path = leftSecond
+	model.panes[0].location.Raw = leftSecond
+	model.panes[0].showHidden = true
+	model.focus = 1
+	if err := model.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restored, err := New(Options{Left: t.TempDir(), Right: t.TempDir(), restoreSession: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.close()
+	if len(restored.tabs[0]) != 2 || restored.activeTab[0] != 1 || restored.panes[0].location.Path != leftSecond {
+		t.Fatalf("restored left tabs = count %d, active %d, path %q", len(restored.tabs[0]), restored.activeTab[0], restored.panes[0].location.Path)
+	}
+	if restored.tabs[0][0].location.Path != leftFirst || !restored.tabs[0][1].showHidden {
+		t.Fatalf("restored left tab details = %#v", restored.tabs[0])
+	}
+	if len(restored.tabs[1]) != 1 || restored.panes[1].location.Path != rightOnly {
+		t.Fatalf("restored single right tab = count %d, path %q", len(restored.tabs[1]), restored.panes[1].location.Path)
+	}
+	if restored.focus != 1 || restored.status != "Previous session restored" {
+		t.Fatalf("restored focus/status = %d, %q", restored.focus, restored.status)
+	}
+}
+
+func TestSessionIsPersistedBeforeAsynchronousPaneLoad(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	left, right, next := t.TempDir(), t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: left, Right: right})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.persistSession = true
+	model.panes[0].location.Path = next
+	model.panes[0].location.Raw = next
+
+	// Merely scheduling the load must save the new location. The command need
+	// not finish, which models a terminal window being closed immediately.
+	if command := model.loadPaneCmd(0); command == nil {
+		t.Fatal("loadPaneCmd returned no command")
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Session == nil || loaded.Session.Panes[0].Tabs[0].Location != next || loaded.Session.Panes[1].Tabs[0].Location != right {
+		t.Fatalf("autosaved session = %#v", loaded.Session)
+	}
+}
+
+func TestExplicitLocationsOverrideSavedSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	savedLeft, savedRight := t.TempDir(), t.TempDir()
+	cfg := config.Config{Session: &config.Session{Panes: [2]config.SessionPane{
+		{Tabs: []config.SessionTab{{Location: savedLeft}}},
+		{Tabs: []config.SessionTab{{Location: savedRight}}},
+	}}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	explicitLeft, explicitRight := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: explicitLeft, Right: explicitRight})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	if model.panes[0].location.Path != explicitLeft || model.panes[1].location.Path != explicitRight || len(model.tabs[0]) != 1 || len(model.tabs[1]) != 1 {
+		t.Fatalf("explicit locations were not honored: left %#v, right %#v", model.tabs[0], model.tabs[1])
+	}
+}
+
 func TestFunctionKeysMoveBetweenTabs(t *testing.T) {
 	directory := t.TempDir()
 	model, err := New(Options{Left: directory, Right: directory})
@@ -412,6 +572,101 @@ func TestFunctionKeysMoveBetweenTabs(t *testing.T) {
 	model.Update(tea.KeyMsg{Type: tea.KeyF12})
 	if model.activeTab[0] != 1 {
 		t.Fatalf("F12 active tab = %d, want 1", model.activeTab[0])
+	}
+}
+
+func TestTabsSwitchWithMouseAndReliableKeyboardFallbacks(t *testing.T) {
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	model.width, model.height = 120, 32
+	model.newTab(0)
+
+	// The first tab starts at screen column 2: one frame cell and one tab-row pad.
+	model.Update(tea.MouseMsg{X: 3, Y: 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if model.activeTab[0] != 0 {
+		t.Fatalf("mouse-selected tab = %d, want 0", model.activeTab[0])
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	if model.activeTab[0] != 1 {
+		t.Fatalf("Alt+Right selected tab = %d, want 1", model.activeTab[0])
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if model.activeTab[0] != 0 {
+		t.Fatalf("Shift+Tab selected tab = %d, want 0", model.activeTab[0])
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	if model.activeTab[0] != 1 || model.status != "Activated tab 2 of 2" {
+		t.Fatalf("Ctrl+Right tab state = active %d, status %q", model.activeTab[0], model.status)
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	if model.activeTab[0] != 0 || model.status != "Activated tab 1 of 2" {
+		t.Fatalf("Ctrl+Left tab state = active %d, status %q", model.activeTab[0], model.status)
+	}
+}
+
+func TestSingleTransferPromptsForDestinationName(t *testing.T) {
+	sourceDir, destinationDir := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: sourceDir, Right: destinationDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	entry := vfs.Entry{Name: "report.txt", Path: filepath.Join(sourceDir, "report.txt")}
+	model.panes[0].entries = []vfs.Entry{entry}
+	model.panes[1].location.Backend = remotePathBackend{Local: vfs.NewLocal()}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyF5})
+	if model.modal != modalPrompt || model.prompt.action != promptCopyAs || string(model.prompt.value) != entry.Name {
+		t.Fatalf("copy prompt = modal %v, action %v, value %q", model.modal, model.prompt.action, model.prompt.value)
+	}
+	model.prompt.value, model.prompt.cursor = []rune("renamed.txt"), len([]rune("renamed.txt"))
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.modal != modalConfirm || model.confirm.action != confirmCopy || model.confirm.destinationName != "renamed.txt" {
+		t.Fatalf("copy confirmation = modal %v, action %v, destination %q", model.modal, model.confirm.action, model.confirm.destinationName)
+	}
+
+	model.modal, model.confirm = modalNone, confirmState{}
+	model.Update(tea.KeyMsg{Type: tea.KeyF6})
+	if model.modal != modalPrompt || model.prompt.action != promptMoveAs || string(model.prompt.value) != entry.Name {
+		t.Fatalf("move prompt = modal %v, action %v, value %q", model.modal, model.prompt.action, model.prompt.value)
+	}
+}
+
+func TestMergerUsesSingleSelectionsIncludingDirectories(t *testing.T) {
+	leftDir, rightDir := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: leftDir, Right: rightDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	leftFile := vfs.Entry{Name: "cursor.txt", Path: filepath.Join(leftDir, "cursor.txt")}
+	leftSelected := vfs.Entry{Name: "chosen", Path: filepath.Join(leftDir, "chosen"), Dir: true}
+	rightFile := vfs.Entry{Name: "cursor.txt", Path: filepath.Join(rightDir, "cursor.txt")}
+	rightSelected := vfs.Entry{Name: "chosen", Path: filepath.Join(rightDir, "chosen"), Dir: true}
+	model.panes[0].entries = []vfs.Entry{leftFile, leftSelected}
+	model.panes[1].entries = []vfs.Entry{rightFile, rightSelected}
+	model.panes[0].selected[leftSelected.Path] = true
+	model.panes[1].selected[rightSelected.Path] = true
+
+	leftPath, rightPath, ok := model.mergerPaths()
+	if !ok || leftPath != leftSelected.Path || rightPath != rightSelected.Path {
+		t.Fatalf("merger paths = %q, %q, %v", leftPath, rightPath, ok)
+	}
+	model.panes[0].selected[leftFile.Path] = true
+	leftPath, rightPath, ok = model.mergerPaths()
+	if !ok || leftPath != leftFile.Path || rightPath != leftSelected.Path {
+		t.Fatalf("same-pane merger paths = %q, %q, %v", leftPath, rightPath, ok)
+	}
+
+	// A same-pane comparison does not depend on the other pane being local.
+	model.panes[1].location.Backend = remotePathBackend{Local: vfs.NewLocal()}
+	leftPath, rightPath, ok = model.mergerPaths()
+	if !ok || leftPath != leftFile.Path || rightPath != leftSelected.Path {
+		t.Fatalf("same-pane merger paths with remote other pane = %q, %q, %v", leftPath, rightPath, ok)
 	}
 }
 
@@ -581,6 +836,21 @@ func TestLocationUsesCredentialUsernameOnlyWhenMissing(t *testing.T) {
 	}
 	if got := locationWithCredentialUsername("sftp://bob@host.example/home", "alice"); got != "sftp://bob@host.example/home" {
 		t.Fatalf("existing username was replaced: %q", got)
+	}
+}
+
+func TestSessionUsesSavedBookmarkPasswordForSameRemoteConnection(t *testing.T) {
+	cfg := config.Config{Bookmarks: []config.Bookmark{{
+		Name: "NAS", Location: "ftpes://alice@nas.example:5021/home", Password: "saved-secret",
+	}}}
+	if got := sessionPassword(cfg, "ftpes://alice@nas.example:5021/other/path"); got != "saved-secret" {
+		t.Fatalf("session password = %q", got)
+	}
+	if got := sessionPassword(cfg, "ftpes://bob@nas.example:5021/other/path"); got != "" {
+		t.Fatalf("session reused password for another user: %q", got)
+	}
+	if got := sessionPassword(cfg, "/tmp/local"); got != "" {
+		t.Fatalf("local session received password %q", got)
 	}
 }
 

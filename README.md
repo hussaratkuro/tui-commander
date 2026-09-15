@@ -16,6 +16,8 @@ Mocha as a fallback.
   navigation.
 - Independent tabs in both panes, preserving each tab's location, selection,
   cursor, and scroll position.
+- Restores both panes' tab locations, active tabs, and focus on the next launch;
+  explicit command-line locations start and replace the saved session.
 - Create and extract 7z, ZIP, RAR, GZ, TAR, and TAR.GZ archives.
 - MIME-aware application chooser with open-once and set-default actions.
 - Toggleable integrated terminal panel that starts in the active local directory.
@@ -25,7 +27,7 @@ Mocha as a fallback.
   credential references resolved through `gopass`.
 - Remote files open through a managed local copy; changed copies can be uploaded
   with `Alt+U`.
-- Launch `merger` for the current local entry in both panes.
+- Launch `merger` for two selected local entries in one pane or one from each.
 - Dry-run directory sync center with one-way/two-way plans, optional SHA-256
   comparison, resumable queues, and failed-item retry.
 
@@ -110,7 +112,10 @@ also accepted instead of the `DOMAIN;user` form.
 | `Ctrl+T` | Create a tab in the active pane |
 | `Ctrl+W` | Close the active tab |
 | `F11` / `F12` | Previous / next tab |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Left` / `Ctrl+Right` | Previous / next tab |
+| `Alt+Left` / `Alt+Right` | Previous / next tab |
+| `Shift+Tab` | Previous tab |
+| Click a tab | Activate that tab |
 | `Alt+1` … `Alt+9` / `Alt+0` | Activate a numbered tab / last tab |
 | `Enter` | Enter a directory or open a file with its default app |
 | `F3` / `Ctrl+F` | Fuzzy-find files and directories with `fzf` |
@@ -120,8 +125,8 @@ also accepted instead of the `DOMAIN;user` form.
 | `*` | Invert the selection of all visible entries |
 | `Backspace` | Edit the quick filter, or open the parent when no filter is active |
 | `F2` | Rename |
-| `F5` | Copy to the other pane; restore when the Recycle Bin is active |
-| `F6` | Move to the other pane |
+| `F5` | Copy to the other pane; a single entry can be given a new name |
+| `F6` | Move to the other pane; a single entry can be given a new name |
 | `F7` | Create directory |
 | `F8` | Trash local items; permanently delete trashed or remote items |
 | `F9` | Show or hide the integrated terminal |
@@ -134,7 +139,7 @@ also accepted instead of the `DOMAIN;user` form.
 | `Ctrl+L` | Enter a path or connection URL |
 | `Ctrl+B` | Bookmark the active location |
 | `Ctrl+H` | Show or hide dotfiles |
-| `Alt+M` | Open current local entries in `merger` |
+| `Alt+M` | Compare two selected local entries in the active pane, or one chosen entry from each pane |
 | `Alt+R` | Open or close the Recycle Bin in the active pane |
 | `Alt+U` | Upload a changed remote file opened locally |
 | `Ctrl+R` | Refresh active pane |

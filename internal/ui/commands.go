@@ -63,7 +63,7 @@ func (m *Model) openCommandPalette() {
 		{commandHidden, "Toggle hidden files", "Ctrl+H"},
 		{commandTerminal, "Toggle integrated terminal", "F9"},
 		{commandRecycleBin, "Open or close Recycle Bin", "Alt+R"},
-		{commandMerger, "Compare highlighted pane entries in merger", "Alt+M"},
+		{commandMerger, "Compare two chosen entries in merger", "Alt+M"},
 		{commandQuit, "Quit tui-commander", "F10"},
 	}}
 	m.modal = modalCommands
