@@ -245,9 +245,18 @@ func (m *Model) renderFooter(width int) string {
 		}
 		status += " · Esc cancels"
 	}
-	if pane := m.currentPane(); !m.busy && !m.terminalVisible && pane.filter != "" {
-		status = fmt.Sprintf("Filter: %q · %d/%d matches · Backspace edits · Esc clears", pane.filter, len(pane.visibleEntries()), len(pane.entries))
-		style = statusStyle
+	if pane := m.currentPane(); !m.busy && !m.terminalVisible {
+		switch {
+		case pane.filter != "":
+			status = fmt.Sprintf("Filter: %q · %d/%d matches · Backspace edits · Esc clears", pane.filter, len(pane.visibleEntries()), len(pane.entries))
+			style = statusStyle
+		case pane.filterInput:
+			status = "Filter: type to narrow the listing · Esc clears"
+			style = statusStyle
+		case pane.search != "":
+			status = fmt.Sprintf("Search: %q · Backspace edits · Esc clears", pane.search)
+			style = statusStyle
+		}
 	}
 	statusLine := style.Width(width).Render(" " + truncateEnd(status, max(1, width-2)))
 	lines := []string{statusLine}
@@ -359,7 +368,7 @@ type helpBinding struct{ keys, action string }
 var helpBindings = []helpBinding{
 	{"F1", "Open or close this Help menu"},
 	{"F2", "Rename the highlighted entry"},
-	{"F3 / Ctrl+F", "Open the fuzzy finder"},
+	{"F3 / Alt+F", "Open the fuzzy finder"},
 	{"F4 / Ctrl+O", "Choose file application"},
 	{"F5", "Copy; name one chosen entry"},
 	{"F6", "Move; name one chosen entry"},
@@ -385,10 +394,12 @@ var helpBindings = []helpBinding{
 	{"Space", "Toggle highlighted selection"},
 	{"Ctrl+A", "Select all visible entries"},
 	{"*", "Invert visible selection"},
-	{"Printable characters", "Add text to the quick filter"},
-	{"Backspace (filter active)", "Remove last filter character"},
-	{"Backspace (no filter)", "Open the parent directory"},
-	{"Esc (filter active)", "Clear the quick filter"},
+	{"Printable characters", "Jump highlight to typed name"},
+	{"Ctrl+F", "Toggle quick filter input"},
+	{"Backspace (filter/search)", "Remove last typed character"},
+	{"Backspace (otherwise)", "Open parent, keep highlight"},
+	{"Esc (filter/search)", "Clear the quick filter/search"},
+	{"Ctrl+Numpad+ / Ctrl+Numpad-", "Zoom terminal font (kitty)"},
 	{"Ctrl+H", "Toggle hidden files"},
 	{"Ctrl+Shift+P / Ctrl+P", "Open fuzzy command palette"},
 	{"Ctrl+S", "Open directory sync center"},

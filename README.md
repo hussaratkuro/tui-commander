@@ -118,12 +118,16 @@ also accepted instead of the `DOMAIN;user` form.
 | Click a tab | Activate that tab |
 | `Alt+1` … `Alt+9` / `Alt+0` | Activate a numbered tab / last tab |
 | `Enter` | Enter a directory or open a file with its default app |
-| `F3` / `Ctrl+F` | Fuzzy-find files and directories with `fzf` |
+| `F3` / `Alt+F` | Fuzzy-find files and directories with `fzf` |
+| Printable characters | Jump the highlight to the first name matching the typed text |
+| `Ctrl+F` | Toggle quick filter input; typed text then narrows the listing |
 | `F4` / `Ctrl+O` | Choose an application |
 | `Space` | Toggle selection |
 | `Ctrl+A` | Select every visible entry |
 | `*` | Invert the selection of all visible entries |
-| `Backspace` | Edit the quick filter, or open the parent when no filter is active |
+| `Backspace` | Edit the quick filter or search text, or open the parent directory with the highlight kept on the directory just left |
+| `Esc` | Clear the quick filter or search text |
+| `Ctrl+Numpad+` / `Ctrl+Numpad-` | Zoom the terminal font in or out (kitty only, needs `allow_remote_control yes` in `kitty.conf`) |
 | `F2` | Rename |
 | `F5` | Copy to the other pane; a single entry can be given a new name |
 | `F6` | Move to the other pane; a single entry can be given a new name |

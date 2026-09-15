@@ -101,7 +101,7 @@ func TestHelpListsBindingsOneActionPerRowAndScrolls(t *testing.T) {
 	model.Update(tea.KeyMsg{Type: tea.KeyF1})
 
 	view := model.View()
-	if model.modal != modalHelp || !strings.Contains(view, "F3 / Ctrl+F") || !strings.Contains(view, "one action per row") {
+	if model.modal != modalHelp || !strings.Contains(view, "F3 / Alt+F") || !strings.Contains(view, "one action per row") {
 		t.Fatalf("initial Help view is incomplete:\n%s", view)
 	}
 	if got := lipgloss.Height(view); got != 24 {

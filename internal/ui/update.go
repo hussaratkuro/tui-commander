@@ -243,6 +243,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
+		if direction := zoomKey(message); direction != 0 {
+			return m, m.zoomFont(direction)
+		}
 		if m.modal == modalPrompt {
 			if editKey := promptUnknownControlKey(message); editKey != "" {
 				if !m.prompt.checkboxFocus {
@@ -345,8 +348,15 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openCommandPalette()
 	case "ctrl+s":
 		return m, m.openSyncCenter()
-	case "f3", "ctrl+f":
+	case "f3", "alt+f":
 		return m, m.startFuzzyFinder()
+	case "ctrl+f":
+		pane.filterInput, pane.search = !pane.filterInput, ""
+		if pane.filterInput {
+			m.setStatus("Filter: type to narrow the listing · Esc clears", false)
+		} else {
+			m.setStatus("Filter input closed", false)
+		}
 	case "tab":
 		m.focus = 1 - m.focus
 		m.persistSessionState()
@@ -359,28 +369,36 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+left", "shift+tab", "ctrl+pgup", "alt+left", "f11":
 		return m, m.changeTab(m.focus, -1)
 	case "up":
-		pane.cursor--
+		pane.cursor, pane.search = pane.cursor-1, ""
 		pane.clamp(visible)
 	case "down":
-		pane.cursor++
+		pane.cursor, pane.search = pane.cursor+1, ""
 		pane.clamp(visible)
 	case "pgup":
-		pane.cursor -= visible
+		pane.cursor, pane.search = pane.cursor-visible, ""
 		pane.clamp(visible)
 	case "pgdown":
-		pane.cursor += visible
+		pane.cursor, pane.search = pane.cursor+visible, ""
 		pane.clamp(visible)
 	case "home":
-		pane.cursor = 0
+		pane.cursor, pane.search = 0, ""
 		pane.clamp(visible)
 	case "end":
-		pane.cursor = len(pane.visibleEntries()) - 1
+		pane.cursor, pane.search = len(pane.visibleEntries())-1, ""
 		pane.clamp(visible)
 	case "esc":
-		if pane.filter != "" {
-			pane.filter, pane.cursor, pane.offset = "", 0, 0
+		switch {
+		case pane.filter != "":
+			pane.clearInput()
+			pane.cursor, pane.offset = 0, 0
 			pane.clamp(visible)
 			m.setStatus("Filter cleared", false)
+		case pane.filterInput:
+			pane.clearInput()
+			m.setStatus("Filter input closed", false)
+		case pane.search != "":
+			pane.search = ""
+			m.setStatus("Search cleared", false)
 		}
 	case " ":
 		if entry, ok := pane.current(); ok {
@@ -413,7 +431,7 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f4", "ctrl+o":
 		return m, m.openCurrent(true)
 	case "backspace":
-		if pane.filter != "" {
+		if pane.filterInput && pane.filter != "" {
 			runes := []rune(pane.filter)
 			pane.filter, pane.cursor, pane.offset = string(runes[:len(runes)-1]), 0, 0
 			pane.clamp(visible)
@@ -422,11 +440,13 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		parent := pane.location.Backend.Dir(pane.location.Path)
-		if parent != pane.location.Path {
-			pane.location.Path, pane.filter, pane.cursor, pane.offset, pane.loading = parent, "", 0, 0, true
-			return m, m.loadPaneCmd(m.focus)
+		if pane.search != "" {
+			runes := []rune(pane.search)
+			pane.search = string(runes[:len(runes)-1])
+			pane.jumpToSearch(visible)
+			break
 		}
+		return m, m.openParent()
 	case "ctrl+r":
 		pane.loading = true
 		return m, m.loadPaneCmd(m.focus)
@@ -573,10 +593,18 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					typed.WriteRune(character)
 				}
 			}
-			if typed.Len() > 0 {
+			if typed.Len() == 0 {
+				break
+			}
+			if pane.filterInput {
 				pane.filter += typed.String()
 				pane.cursor, pane.offset = 0, 0
 				pane.clamp(visible)
+				break
+			}
+			pane.search += typed.String()
+			if !pane.jumpToSearch(visible) {
+				m.setStatus(fmt.Sprintf("No entry matches %q", pane.search), false)
 			}
 		}
 	}
@@ -1319,6 +1347,20 @@ func (m *Model) stopBusy() {
 	m.busy, m.busyLabel, m.cancel, m.progressCh = false, "", nil, nil
 }
 
+// openParent moves the active pane up one level and keeps the highlight on the
+// directory that was just left.
+func (m *Model) openParent() tea.Cmd {
+	pane := m.currentPane()
+	current := pane.location.Path
+	parent := pane.location.Backend.Dir(current)
+	if parent == current {
+		return nil
+	}
+	pane.enterDirectory(parent)
+	pane.revealPath = current
+	return m.loadPaneCmd(m.focus)
+}
+
 func (m *Model) openCurrent(chooser bool) tea.Cmd {
 	pane := m.currentPane()
 	entry, ok := pane.current()
@@ -1330,7 +1372,7 @@ func (m *Model) openCurrent(chooser bool) tea.Cmd {
 			m.setStatus("Recycle Bin directories are restored as complete items with F5", false)
 			return nil
 		}
-		pane.location.Path, pane.filter, pane.cursor, pane.offset, pane.loading = entry.Path, "", 0, 0, true
+		pane.enterDirectory(entry.Path)
 		return m.loadPaneCmd(m.focus)
 	}
 	if pane.location.Backend.ID() == "local" {

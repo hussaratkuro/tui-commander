@@ -109,7 +109,8 @@ func (m *Model) handleFuzzyFinished(message fuzzyFinishedMsg) (tea.Model, tea.Cm
 		return m, nil
 	}
 	pane := message.pane
-	pane.filter, pane.cursor, pane.offset = "", 0, 0
+	pane.clearInput()
+	pane.cursor, pane.offset = 0, 0
 	if !message.local {
 		target := pane.location.Backend.Join(message.base, message.selection)
 		for index, entry := range pane.visibleEntries() {

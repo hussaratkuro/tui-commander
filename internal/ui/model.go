@@ -27,6 +27,8 @@ type pane struct {
 	offset        int
 	selected      map[string]bool
 	filter        string
+	filterInput   bool
+	search        string
 	showHidden    bool
 	revealPath    string
 	git           gitSummary
@@ -584,6 +586,43 @@ func (p *pane) selectedEntries() []vfs.Entry {
 		}
 	}
 	return result
+}
+
+// clearInput drops the quick filter, its input mode, and the type-ahead search.
+func (p *pane) clearInput() {
+	p.filter, p.filterInput, p.search = "", false, ""
+}
+
+// enterDirectory changes the listing and resets every per-listing input state.
+func (p *pane) enterDirectory(path string) {
+	p.location.Path, p.cursor, p.offset, p.loading = path, 0, 0, true
+	p.clearInput()
+}
+
+// jumpToSearch moves the highlight to the first visible entry matching the
+// type-ahead search, preferring a name prefix over a substring match.
+func (p *pane) jumpToSearch(visible int) bool {
+	query := strings.ToLower(p.search)
+	if query == "" {
+		return false
+	}
+	match := -1
+	for index, entry := range p.visibleEntries() {
+		name := strings.ToLower(entry.Name)
+		if strings.HasPrefix(name, query) {
+			match = index
+			break
+		}
+		if match < 0 && strings.Contains(name, query) {
+			match = index
+		}
+	}
+	if match < 0 {
+		return false
+	}
+	p.cursor = match
+	p.clamp(visible)
+	return true
 }
 
 func (p *pane) clamp(visible int) {
