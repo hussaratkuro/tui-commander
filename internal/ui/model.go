@@ -57,6 +57,7 @@ type promptAction uint8
 const (
 	promptNone promptAction = iota
 	promptMkdir
+	promptCreateFile
 	promptRename
 	promptCopyAs
 	promptMoveAs

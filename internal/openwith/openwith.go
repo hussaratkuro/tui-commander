@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,13 @@ func MIMEType(path string) (string, error) {
 	if mimeType == "" {
 		return "application/octet-stream", nil
 	}
+	if mimeType == "inode/x-empty" || mimeType == "application/x-zerosize" {
+		if inferred := mime.TypeByExtension(filepath.Ext(path)); inferred != "" {
+			if mediaType, _, parseErr := mime.ParseMediaType(inferred); parseErr == nil {
+				mimeType = mediaType
+			}
+		}
+	}
 	return mimeType, nil
 }
 
@@ -44,6 +52,7 @@ func Applications(path string) ([]Application, string, error) {
 	defaultID := Default(mimeType)
 	seen := make(map[string]bool)
 	var applications []Application
+	var fallback []Application
 	for _, directory := range applicationDirectories() {
 		filepath.WalkDir(directory, func(filePath string, item os.DirEntry, walkErr error) error {
 			if walkErr != nil || item.IsDir() || !strings.HasSuffix(item.Name(), ".desktop") {
@@ -68,15 +77,19 @@ func Applications(path string) ([]Application, string, error) {
 				}
 			}
 			compatible := mimeListContains(entry.mimeTypes, mimeType)
-			if !compatible && desktopID != defaultID {
-				return nil
-			}
-			applications = append(applications, Application{
+			application := Application{
 				Name: entry.name, DesktopID: desktopID, DesktopFile: filePath,
 				Default: desktopID == defaultID, Terminal: entry.terminal,
-			})
+			}
+			fallback = append(fallback, application)
+			if compatible || desktopID == defaultID {
+				applications = append(applications, application)
+			}
 			return nil
 		})
+	}
+	if len(applications) == 0 {
+		applications = fallback
 	}
 	sort.SliceStable(applications, func(i, j int) bool {
 		if applications[i].Default != applications[j].Default {

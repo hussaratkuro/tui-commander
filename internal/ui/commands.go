@@ -16,6 +16,7 @@ const (
 	commandSync
 	commandOpen
 	commandOpenWith
+	commandCreateFile
 	commandCopy
 	commandMove
 	commandMkdir
@@ -51,6 +52,7 @@ func (m *Model) openCommandPalette() {
 		{commandSync, "Synchronize the two directories", "Ctrl+S"},
 		{commandOpen, "Open highlighted entry", "Enter"},
 		{commandOpenWith, "Open highlighted file with application", "F4"},
+		{commandCreateFile, "Create empty file", "Shift+F4"},
 		{commandCopy, "Copy selection to other pane", "F5"},
 		{commandMove, "Move selection to other pane", "F6"},
 		{commandMkdir, "Create directory", "F7"},
@@ -144,6 +146,8 @@ func (m *Model) executeCommand(id commandID) (tea.Model, tea.Cmd) {
 		return m.handleMainKey(key(tea.KeyEnter))
 	case commandOpenWith:
 		return m.handleMainKey(key(tea.KeyF4))
+	case commandCreateFile:
+		return m.handleMainKey(key(tea.KeyF16))
 	case commandCopy:
 		return m.handleMainKey(key(tea.KeyF5))
 	case commandMove:

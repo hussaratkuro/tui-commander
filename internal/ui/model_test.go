@@ -73,7 +73,7 @@ func TestSingleLocationHeaderTracksFocusedPane(t *testing.T) {
 func TestShortcutFooterWrapsWithoutDroppingBindings(t *testing.T) {
 	rows := shortcutRows(80)
 	joined := strings.Join(rows, "\n")
-	for _, binding := range []string{"F1", "F12", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+R"} {
+	for _, binding := range []string{"F1", "F12", "Shift+F4", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+R"} {
 		if !strings.Contains(joined, binding) {
 			t.Fatalf("shortcut footer is missing %s:\n%s", binding, joined)
 		}
@@ -634,6 +634,33 @@ func TestSingleTransferPromptsForDestinationName(t *testing.T) {
 	if model.modal != modalPrompt || model.prompt.action != promptMoveAs || string(model.prompt.value) != entry.Name {
 		t.Fatalf("move prompt = modal %v, action %v, value %q", model.modal, model.prompt.action, model.prompt.value)
 	}
+}
+
+func TestShiftF4StartsCreateFilePrompt(t *testing.T) {
+	directory := t.TempDir()
+	model, err := New(Options{Left: directory, Right: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+
+	model.Update(tea.KeyMsg{Type: tea.KeyF16})
+	if model.modal != modalPrompt || model.prompt.action != promptCreateFile || model.prompt.title != "New file" {
+		t.Fatalf("create prompt = modal %v, action %v, title %q", model.modal, model.prompt.action, model.prompt.title)
+	}
+	model.prompt.value = []rune(filepath.Join("nested", "notes.txt"))
+	model.prompt.cursor = len(model.prompt.value)
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.modal != modalPrompt || model.prompt.action != promptCreateFile || !strings.Contains(model.status, "single name") {
+		t.Fatalf("invalid name state = modal %v, action %v, status %q", model.modal, model.prompt.action, model.status)
+	}
+	model.prompt.value = []rune("notes.txt")
+	model.prompt.cursor = len(model.prompt.value)
+	_, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || model.modal != modalNone || !model.busy {
+		t.Fatalf("create submit = command %v, modal %v, busy %v", command != nil, model.modal, model.busy)
+	}
+	model.stopBusy()
 }
 
 func TestMergerUsesSingleSelectionsIncludingDirectories(t *testing.T) {

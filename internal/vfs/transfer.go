@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 )
 
 type TransferProgress struct {
@@ -36,6 +37,25 @@ func CopyAs(ctx context.Context, source Backend, sourceEntry Entry, destination 
 
 func Move(ctx context.Context, source Backend, sourceEntry Entry, destination Backend, destinationDir string, progress ProgressFunc) error {
 	return MoveAs(ctx, source, sourceEntry, destination, destinationDir, sourceEntry.Name, progress)
+}
+
+// CreateEmpty creates a new, empty file in destinationDir. It deliberately
+// refuses to replace an existing entry, since Backend.Upload may truncate one.
+func CreateEmpty(ctx context.Context, destination Backend, destinationDir, name string, mode fs.FileMode) error {
+	destinationPath, err := namedDestination(destination, destinationDir, name)
+	if err != nil {
+		return err
+	}
+	entries, err := destination.List(ctx, destinationDir)
+	if err != nil {
+		return fmt.Errorf("list %s: %w", destinationDir, err)
+	}
+	for _, entry := range entries {
+		if entry.Name == name {
+			return fmt.Errorf("file already exists: %s: %w", destinationPath, fs.ErrExist)
+		}
+	}
+	return destination.Upload(ctx, destinationPath, strings.NewReader(""), mode, nil)
 }
 
 // MoveAs moves sourceEntry into destinationDir using destinationName for the

@@ -144,7 +144,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(message.items) == 0 {
-			m.setStatus("No compatible desktop applications for "+message.mimeType, true)
+			m.setStatus("No desktop applications are available for "+message.mimeType, true)
 			return m, nil
 		}
 		m.modal = modalApplications
@@ -428,6 +428,12 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openCurrent(false)
 	case "f4", "ctrl+o":
 		return m, m.openCurrent(true)
+	case "f16": // Terminals encode Shift+F4 as the extended F16 key.
+		if pane.location.Backend.ID() == "trash" {
+			m.setStatus("Files cannot be created in the Recycle Bin", true)
+			break
+		}
+		m.startPrompt("New file", "", promptCreateFile, false)
 	case "backspace":
 		if pane.filterInput && pane.filter != "" {
 			runes := []rune(pane.filter)
@@ -1037,6 +1043,19 @@ func (m *Model) submitPrompt(action promptAction, value, pending string, optionC
 		}
 		backend, path := pane.location.Backend, pane.location.Backend.Join(pane.location.Path, value)
 		return m.simpleOperation("Create directory", func(ctx context.Context) error { return backend.Mkdir(ctx, path, 0o755) })
+	case promptCreateFile:
+		if value == "" {
+			return nil
+		}
+		backend, directory := pane.location.Backend, pane.location.Path
+		if !validTransferName(backend, value) {
+			m.setStatus("File name must be a single name", true)
+			m.startPrompt("New file", value, promptCreateFile, false)
+			return nil
+		}
+		return m.simpleOperation("Create file", func(ctx context.Context) error {
+			return vfs.CreateEmpty(ctx, backend, directory, value, 0o644)
+		})
 	case promptRename:
 		entry, ok := pane.current()
 		if !ok || value == "" || value == entry.Name {

@@ -122,6 +122,7 @@ also accepted instead of the `DOMAIN;user` form.
 | Printable characters | Jump the highlight to the first name matching the typed text |
 | `Ctrl+F` | Toggle quick filter input; typed text then narrows the listing |
 | `F4` / `Ctrl+O` | Choose an application |
+| `Shift+F4` | Create an empty file in the active directory |
 | `Space` | Toggle selection |
 | `Ctrl+A` | Select every visible entry |
 | `*` | Invert the selection of all visible entries |

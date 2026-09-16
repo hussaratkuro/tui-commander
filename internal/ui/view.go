@@ -270,6 +270,7 @@ type shortcutHint struct{ key, action string }
 
 var footerShortcuts = []shortcutHint{
 	{"F1", "Help"}, {"F2", "Rename"}, {"F3", "Fuzzy"}, {"F4", "OpenWith"},
+	{"Shift+F4", "NewFile"},
 	{"F5", "Copy/Restore"}, {"F6", "Move"}, {"F7", "Mkdir"}, {"F8", "Trash/Delete"},
 	{"F9", "Terminal"}, {"F10", "Quit"}, {"F11", "PrevTab"}, {"F12", "NextTab"},
 	{"Ctrl+N", "Connections"}, {"Ctrl+L", "Location"}, {"Ctrl+B", "Bookmark"},
@@ -370,6 +371,7 @@ var helpBindings = []helpBinding{
 	{"F2", "Rename the highlighted entry"},
 	{"F3 / Alt+F", "Open the fuzzy finder"},
 	{"F4 / Ctrl+O", "Choose file application"},
+	{"Shift+F4", "Create an empty file"},
 	{"F5", "Copy; name one chosen entry"},
 	{"F6", "Move; name one chosen entry"},
 	{"F7", "Create a directory"},

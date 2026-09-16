@@ -2,7 +2,9 @@ package vfs
 
 import (
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,5 +107,34 @@ func TestCopyAsRenamesDirectoryRootAndRejectsPathNames(t *testing.T) {
 	}
 	if err := CopyAs(context.Background(), backend, entry, backend, destinationDir, filepath.Join("nested", "name"), nil); err == nil {
 		t.Fatal("CopyAs accepted a path instead of a destination name")
+	}
+}
+
+func TestCreateEmptyCreatesNewFileWithoutReplacingExistingEntry(t *testing.T) {
+	directory := t.TempDir()
+	backend := NewLocal()
+	if err := CreateEmpty(context.Background(), backend, directory, "notes.txt", 0o640); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "notes.txt")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 || info.Mode().Perm() != 0o640 {
+		t.Fatalf("created file = size %d, mode %o", info.Size(), info.Mode().Perm())
+	}
+	if err := os.WriteFile(path, []byte("keep"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateEmpty(context.Background(), backend, directory, "notes.txt", 0o644); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("existing file error = %v, want fs.ErrExist", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("existing file contents = %q, err = %v", data, err)
+	}
+	if err := CreateEmpty(context.Background(), backend, directory, filepath.Join("nested", "notes.txt"), 0o644); err == nil {
+		t.Fatal("CreateEmpty accepted a path instead of a file name")
 	}
 }
