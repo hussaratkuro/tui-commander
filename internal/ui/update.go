@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1434,7 +1435,7 @@ func (m *Model) openCurrent(chooser bool) tea.Cmd {
 }
 
 func (m *Model) launchDefault(path string, _ *remoteFile) tea.Cmd {
-	return tea.ExecProcess(openwith.DefaultLaunchCommand(path), func(err error) tea.Msg { return appClosedMsg{err: err} })
+	return runNonInteractiveProcess(openwith.DefaultLaunchCommand(path))
 }
 
 func (m *Model) launchSelectedApplication(setDefault bool) tea.Cmd {
@@ -1451,7 +1452,22 @@ func (m *Model) launchSelectedApplication(setDefault bool) tea.Cmd {
 		m.setStatus(application.Name+" is now the default for "+state.mimeType, false)
 	}
 	m.modal = modalNone
-	return tea.ExecProcess(openwith.LaunchCommand(application, state.path), func(err error) tea.Msg { return appClosedMsg{err: err} })
+	return runNonInteractiveProcess(openwith.LaunchCommand(application, state.path))
+}
+
+// runNonInteractiveProcess keeps GUI launchers away from the terminal used by
+// Bubble Tea. tea.ExecProcess is intended for interactive terminal programs:
+// it releases the alternate screen and connects the child to the TUI's
+// standard streams. GUI applications launched through gio can inherit those
+// streams and print diagnostics after the TUI resumes, scrolling and
+// corrupting the rendered frame.
+func runNonInteractiveProcess(command *exec.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		command.Stdin = nil
+		command.Stdout = io.Discard
+		command.Stderr = io.Discard
+		return appClosedMsg{err: command.Run()}
+	}
 }
 
 func (m *Model) firstDirtyRemote() *remoteFile {
