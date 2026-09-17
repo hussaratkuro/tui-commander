@@ -27,7 +27,7 @@ Mocha as a fallback.
   credential references resolved through `gopass`.
 - Remote files open through a managed local copy; changed copies can be uploaded
   with `Alt+U`.
-- Launch `merger` for two selected local entries in one pane or one from each.
+- Launch `merger` for two local entries in selection order within one pane, or one from each.
 - Dry-run directory sync center with one-way/two-way plans, optional SHA-256
   comparison, resumable queues, and failed-item retry.
 
@@ -112,11 +112,13 @@ also accepted instead of the `DOMAIN;user` form.
 | `Ctrl+T` | Create a tab in the active pane |
 | `Ctrl+W` | Close the active tab |
 | `F11` / `F12` | Previous / next tab |
-| `Ctrl+Left` / `Ctrl+Right` | Previous / next tab |
+| `Ctrl+PgUp` / `Ctrl+PgDown` | Previous / next tab |
 | `Alt+Left` / `Alt+Right` | Previous / next tab |
 | `Shift+Tab` | Previous tab |
 | Click a tab | Activate that tab |
 | `Alt+1` … `Alt+9` / `Alt+0` | Activate a numbered tab / last tab |
+| `Ctrl+Left` / `Ctrl+Right` | Open the highlighted directory in the other pane |
+| `Ctrl+U` | Swap the two active panes |
 | `Enter` | Enter a directory or open a file with its default app |
 | `F3` / `Alt+F` | Fuzzy-find files and directories with `fzf` |
 | Printable characters | Jump the highlight to the first name matching the typed text |
@@ -144,7 +146,7 @@ also accepted instead of the `DOMAIN;user` form.
 | `Ctrl+L` | Enter a path or connection URL |
 | `Ctrl+B` | Bookmark the active location |
 | `Ctrl+H` | Show or hide dotfiles |
-| `Alt+M` | Compare two selected local entries in the active pane, or one chosen entry from each pane |
+| `Alt+M` | Compare two selected local entries in the active pane (first selected on the left), or one chosen entry from each pane |
 | `Alt+R` | Open or close the Recycle Bin in the active pane |
 | `Alt+U` | Upload a changed remote file opened locally |
 | `Ctrl+R` | Refresh active pane |

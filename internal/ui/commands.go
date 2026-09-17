@@ -16,6 +16,8 @@ const (
 	commandSync
 	commandOpen
 	commandOpenWith
+	commandOpenOtherPane
+	commandSwapPanes
 	commandCreateFile
 	commandCopy
 	commandMove
@@ -52,6 +54,8 @@ func (m *Model) openCommandPalette() {
 		{commandSync, "Synchronize the two directories", "Ctrl+S"},
 		{commandOpen, "Open highlighted entry", "Enter"},
 		{commandOpenWith, "Open highlighted file with application", "F4"},
+		{commandOpenOtherPane, "Open highlighted directory in other pane", "Ctrl+Left / Ctrl+Right"},
+		{commandSwapPanes, "Swap the two active panes", "Ctrl+U"},
 		{commandCreateFile, "Create empty file", "Shift+F4"},
 		{commandCopy, "Copy selection to other pane", "F5"},
 		{commandMove, "Move selection to other pane", "F6"},
@@ -146,6 +150,10 @@ func (m *Model) executeCommand(id commandID) (tea.Model, tea.Cmd) {
 		return m.handleMainKey(key(tea.KeyEnter))
 	case commandOpenWith:
 		return m.handleMainKey(key(tea.KeyF4))
+	case commandOpenOtherPane:
+		return m.handleMainKey(key(tea.KeyCtrlRight))
+	case commandSwapPanes:
+		return m.handleMainKey(key(tea.KeyCtrlU))
 	case commandCreateFile:
 		return m.handleMainKey(key(tea.KeyF16))
 	case commandCopy:

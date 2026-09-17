@@ -74,6 +74,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			pane.entries = message.entries
 			pane.git = message.git
 			pane.selected = make(map[string]bool)
+			pane.selectionOrder = nil
 			if pane.revealPath != "" {
 				for index, entry := range pane.visibleEntries() {
 					if entry.Path == pane.revealPath {
@@ -320,10 +321,7 @@ func (m *Model) handleMouse(mouse tea.MouseEvent) (tea.Model, tea.Cmd) {
 		pane.cursor = row
 		if mouse.Button == tea.MouseButtonRight || mouse.Ctrl {
 			entry := entries[row]
-			pane.selected[entry.Path] = !pane.selected[entry.Path]
-			if !pane.selected[entry.Path] {
-				delete(pane.selected, entry.Path)
-			}
+			pane.toggleSelected(entry.Path)
 			return m, nil
 		}
 		now := time.Now()
@@ -365,9 +363,13 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.newTab(m.focus)
 	case "ctrl+w":
 		return m, m.closeTab(m.focus)
-	case "ctrl+right", "ctrl+pgdown", "alt+right", "f12":
+	case "ctrl+right", "ctrl+left":
+		return m, m.openCurrentDirectoryInOtherPane()
+	case "ctrl+u":
+		return m, m.swapActivePanes()
+	case "ctrl+pgdown", "alt+right", "f12":
 		return m, m.changeTab(m.focus, 1)
-	case "ctrl+left", "shift+tab", "ctrl+pgup", "alt+left", "f11":
+	case "shift+tab", "ctrl+pgup", "alt+left", "f11":
 		return m, m.changeTab(m.focus, -1)
 	case "up":
 		pane.cursor, pane.search = pane.cursor-1, ""
@@ -403,24 +405,21 @@ func (m *Model) handleMainKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case " ":
 		if entry, ok := pane.current(); ok {
-			pane.selected[entry.Path] = !pane.selected[entry.Path]
-			if !pane.selected[entry.Path] {
-				delete(pane.selected, entry.Path)
-			}
+			pane.toggleSelected(entry.Path)
 		}
 	case "ctrl+a":
 		entries := pane.visibleEntries()
 		for _, entry := range entries {
-			pane.selected[entry.Path] = true
+			pane.setSelected(entry.Path, true)
 		}
 		m.setStatus(fmt.Sprintf("Selected all %d visible entries", len(entries)), false)
 	case "*":
 		selected := 0
 		for _, entry := range pane.visibleEntries() {
 			if pane.selected[entry.Path] {
-				delete(pane.selected, entry.Path)
+				pane.setSelected(entry.Path, false)
 			} else {
-				pane.selected[entry.Path] = true
+				pane.setSelected(entry.Path, true)
 				selected++
 			}
 		}

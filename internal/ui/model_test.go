@@ -73,12 +73,12 @@ func TestSingleLocationHeaderTracksFocusedPane(t *testing.T) {
 func TestShortcutFooterWrapsWithoutDroppingBindings(t *testing.T) {
 	rows := shortcutRows(80)
 	joined := strings.Join(rows, "\n")
-	for _, binding := range []string{"F1", "F12", "Shift+F4", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+R"} {
+	for _, binding := range []string{"F1", "F12", "Ctrl+N", "Ctrl+L", "Ctrl+B", "Ctrl+R", "Alt+F5", "Alt+F6", "Alt+R"} {
 		if !strings.Contains(joined, binding) {
 			t.Fatalf("shortcut footer is missing %s:\n%s", binding, joined)
 		}
 	}
-	for _, excluded := range []string{"Ctrl+G", "Ctrl+H", "Ctrl+T", "Ctrl+Alt+C", "Alt+M", "Alt+U"} {
+	for _, excluded := range []string{"Shift+F4", "Ctrl+G", "Ctrl+H", "Ctrl+T", "Ctrl+Alt+C", "Alt+M", "Alt+U"} {
 		if strings.Contains(joined, excluded) {
 			t.Fatalf("shortcut footer unexpectedly contains %s:\n%s", excluded, joined)
 		}
@@ -598,13 +598,78 @@ func TestTabsSwitchWithMouseAndReliableKeyboardFallbacks(t *testing.T) {
 	if model.activeTab[0] != 0 {
 		t.Fatalf("Shift+Tab selected tab = %d, want 0", model.activeTab[0])
 	}
-	model.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlPgDown})
 	if model.activeTab[0] != 1 || model.status != "Activated tab 2 of 2" {
-		t.Fatalf("Ctrl+Right tab state = active %d, status %q", model.activeTab[0], model.status)
+		t.Fatalf("Ctrl+PgDown tab state = active %d, status %q", model.activeTab[0], model.status)
 	}
-	model.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlPgUp})
 	if model.activeTab[0] != 0 || model.status != "Activated tab 1 of 2" {
-		t.Fatalf("Ctrl+Left tab state = active %d, status %q", model.activeTab[0], model.status)
+		t.Fatalf("Ctrl+PgUp tab state = active %d, status %q", model.activeTab[0], model.status)
+	}
+}
+
+func TestCtrlArrowOpensHighlightedDirectoryInOtherPane(t *testing.T) {
+	leftDirectory, rightDirectory := t.TempDir(), t.TempDir()
+	child := filepath.Join(leftDirectory, "selected-directory")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	model, err := New(Options{Left: leftDirectory, Right: rightDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	left, previousRight := model.panes[0], model.panes[1]
+	left.loading = false
+	left.entries = []vfs.Entry{{Name: "selected-directory", Path: child, Dir: true}}
+
+	_, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	if command == nil {
+		t.Fatal("Ctrl+Right did not start loading the other pane")
+	}
+	if model.focus != 0 || model.panes[0] != left {
+		t.Fatalf("source focus changed: focus %d, pane %p", model.focus, model.panes[0])
+	}
+	opened := model.panes[1]
+	if opened == previousRight || opened.location.Path != child || opened.location.Backend != left.location.Backend {
+		t.Fatalf("opened pane = %#v", opened.location)
+	}
+	if model.tabs[1][model.activeTab[1]] != opened || !opened.loading {
+		t.Fatal("other pane active tab was not replaced with the loading directory")
+	}
+	if model.status != "Opened selected-directory in the right pane" {
+		t.Fatalf("status = %q", model.status)
+	}
+
+	left.entries = []vfs.Entry{{Name: "file.txt", Path: filepath.Join(leftDirectory, "file.txt")}}
+	_, command = model.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	if command != nil || !strings.Contains(model.status, "Highlight a directory") {
+		t.Fatalf("file Ctrl+Left = command %v, status %q", command != nil, model.status)
+	}
+}
+
+func TestCtrlUSwapsActivePanesWithoutMovingInactiveTabs(t *testing.T) {
+	leftDirectory, rightDirectory := t.TempDir(), t.TempDir()
+	model, err := New(Options{Left: leftDirectory, Right: rightDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer model.close()
+	left, right := model.panes[0], model.panes[1]
+	model.newTab(0)
+	leftInactive := model.tabs[0][0]
+	left = model.panes[0]
+	model.focus = 0
+
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	if model.focus != 0 || model.panes[0] != right || model.panes[1] != left {
+		t.Fatalf("swapped panes = focus %d, left %p, right %p", model.focus, model.panes[0], model.panes[1])
+	}
+	if model.tabs[0][0] != leftInactive || model.tabs[0][model.activeTab[0]] != right || model.tabs[1][model.activeTab[1]] != left {
+		t.Fatal("Ctrl+U did not swap only the active tab contents")
+	}
+	if model.status != "Swapped the left and right panes" {
+		t.Fatalf("status = %q", model.status)
 	}
 }
 
@@ -676,24 +741,32 @@ func TestMergerUsesSingleSelectionsIncludingDirectories(t *testing.T) {
 	rightSelected := vfs.Entry{Name: "chosen", Path: filepath.Join(rightDir, "chosen"), Dir: true}
 	model.panes[0].entries = []vfs.Entry{leftFile, leftSelected}
 	model.panes[1].entries = []vfs.Entry{rightFile, rightSelected}
-	model.panes[0].selected[leftSelected.Path] = true
-	model.panes[1].selected[rightSelected.Path] = true
+	model.panes[0].setSelected(leftSelected.Path, true)
+	model.panes[1].setSelected(rightSelected.Path, true)
 
 	leftPath, rightPath, ok := model.mergerPaths()
 	if !ok || leftPath != leftSelected.Path || rightPath != rightSelected.Path {
 		t.Fatalf("merger paths = %q, %q, %v", leftPath, rightPath, ok)
 	}
-	model.panes[0].selected[leftFile.Path] = true
+	model.panes[0].setSelected(leftFile.Path, true)
 	leftPath, rightPath, ok = model.mergerPaths()
-	if !ok || leftPath != leftFile.Path || rightPath != leftSelected.Path {
+	if !ok || leftPath != leftSelected.Path || rightPath != leftFile.Path {
 		t.Fatalf("same-pane merger paths = %q, %q, %v", leftPath, rightPath, ok)
 	}
 
 	// A same-pane comparison does not depend on the other pane being local.
 	model.panes[1].location.Backend = remotePathBackend{Local: vfs.NewLocal()}
 	leftPath, rightPath, ok = model.mergerPaths()
-	if !ok || leftPath != leftFile.Path || rightPath != leftSelected.Path {
+	if !ok || leftPath != leftSelected.Path || rightPath != leftFile.Path {
 		t.Fatalf("same-pane merger paths with remote other pane = %q, %q, %v", leftPath, rightPath, ok)
+	}
+
+	// Deselecting and selecting an entry again makes it the newest (right) side.
+	model.panes[0].setSelected(leftSelected.Path, false)
+	model.panes[0].setSelected(leftSelected.Path, true)
+	leftPath, rightPath, ok = model.mergerPaths()
+	if !ok || leftPath != leftFile.Path || rightPath != leftSelected.Path {
+		t.Fatalf("reselected merger paths = %q, %q, %v", leftPath, rightPath, ok)
 	}
 }
 

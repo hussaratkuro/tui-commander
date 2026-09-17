@@ -21,22 +21,23 @@ import (
 )
 
 type pane struct {
-	location      vfs.Location
-	entries       []vfs.Entry
-	cursor        int
-	offset        int
-	selected      map[string]bool
-	filter        string
-	filterInput   bool
-	search        string
-	showHidden    bool
-	revealPath    string
-	git           gitSummary
-	password      string
-	passwordSaved bool
-	localReturn   string
-	loading       bool
-	err           error
+	location       vfs.Location
+	entries        []vfs.Entry
+	cursor         int
+	offset         int
+	selected       map[string]bool
+	selectionOrder []string
+	filter         string
+	filterInput    bool
+	search         string
+	showHidden     bool
+	revealPath     string
+	git            gitSummary
+	password       string
+	passwordSaved  bool
+	localReturn    string
+	loading        bool
+	err            error
 }
 
 type modalKind uint8
@@ -544,6 +545,59 @@ func (m *Model) activateTab(index, tabIndex int) tea.Cmd {
 	return m.loadPaneCmd(index)
 }
 
+func (m *Model) openCurrentDirectoryInOtherPane() tea.Cmd {
+	source := m.currentPane()
+	entry, ok := source.current()
+	if !ok || !entry.Dir {
+		m.setStatus("Highlight a directory to open it in the other pane", true)
+		return nil
+	}
+	if source.location.Backend.ID() == "trash" {
+		m.setStatus("Recycle Bin directories cannot be opened in the other pane", true)
+		return nil
+	}
+	targetIndex := 1 - m.focus
+	target := m.panes[targetIndex]
+	localReturn := target.localReturn
+	if target.location.Backend.ID() == "local" {
+		localReturn = target.location.Path
+	}
+	if source.location.Backend.ID() == "local" {
+		localReturn = entry.Path
+	}
+	replacement := &pane{
+		location: vfs.Location{
+			Backend: source.location.Backend,
+			Path:    entry.Path,
+			Raw:     locationStringForPath(*source, entry.Path),
+		},
+		selected:      make(map[string]bool),
+		showHidden:    target.showHidden,
+		password:      source.password,
+		passwordSaved: source.passwordSaved,
+		localReturn:   localReturn,
+		loading:       true,
+	}
+	m.panes[targetIndex] = replacement
+	m.tabs[targetIndex][m.activeTab[targetIndex]] = replacement
+	side := "right"
+	if targetIndex == 0 {
+		side = "left"
+	}
+	m.setStatus(fmt.Sprintf("Opened %s in the %s pane", entry.Name, side), false)
+	return m.loadPaneCmd(targetIndex)
+}
+
+func (m *Model) swapActivePanes() tea.Cmd {
+	left, right := m.panes[0], m.panes[1]
+	m.panes[0], m.panes[1] = right, left
+	m.tabs[0][m.activeTab[0]] = right
+	m.tabs[1][m.activeTab[1]] = left
+	m.setStatus("Swapped the left and right panes", false)
+	m.persistSessionState()
+	return nil
+}
+
 func (p *pane) current() (vfs.Entry, bool) {
 	entries := p.visibleEntries()
 	if p.cursor < 0 || p.cursor >= len(entries) {
@@ -581,12 +635,52 @@ func (p *pane) chosen() []vfs.Entry {
 
 func (p *pane) selectedEntries() []vfs.Entry {
 	result := make([]vfs.Entry, 0, len(p.selected))
+	entriesByPath := make(map[string]vfs.Entry, len(p.entries))
 	for _, entry := range p.entries {
-		if p.selected[entry.Path] {
+		entriesByPath[entry.Path] = entry
+	}
+	added := make(map[string]bool, len(p.selected))
+	for _, path := range p.selectionOrder {
+		if entry, ok := entriesByPath[path]; ok && p.selected[path] && !added[path] {
+			result = append(result, entry)
+			added[path] = true
+		}
+	}
+	// Keep selections made by older code or tests usable, while preserving the
+	// explicit order for every selection made through the UI.
+	for _, entry := range p.entries {
+		if p.selected[entry.Path] && !added[entry.Path] {
 			result = append(result, entry)
 		}
 	}
 	return result
+}
+
+func (p *pane) setSelected(path string, selected bool) {
+	if p.selected == nil {
+		p.selected = make(map[string]bool)
+	}
+	if selected {
+		if !p.selected[path] {
+			p.selected[path] = true
+			p.selectionOrder = append(p.selectionOrder, path)
+		}
+		return
+	}
+	if !p.selected[path] {
+		return
+	}
+	delete(p.selected, path)
+	for index, selectedPath := range p.selectionOrder {
+		if selectedPath == path {
+			p.selectionOrder = append(p.selectionOrder[:index], p.selectionOrder[index+1:]...)
+			break
+		}
+	}
+}
+
+func (p *pane) toggleSelected(path string) {
+	p.setSelected(path, !p.selected[path])
 }
 
 // clearInput drops the quick filter, its input mode, and the type-ahead search.
